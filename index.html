@@ -60,6 +60,13 @@
   .term-pop { position:fixed; left:10px; right:10px; bottom:160px; z-index:20; background:#2b2f38; border:1px solid var(--rh); border-radius:8px; padding:10px 34px 10px 12px; font-size:14px; line-height:1.4; box-shadow:0 4px 16px #0008; }
   .term-pop button { position:absolute; top:4px; right:6px; background:none; border:0; color:var(--mut); font-size:16px; }
   .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:4px; }
+  .qlab { display:block; font-size:13px; color:var(--mut); }
+  #qmode { display:block; width:100%; max-width:100%; margin-top:4px; padding:9px; font-size:15px; border-radius:8px; border:1px solid #3a3f4b; background:#111318; color:var(--tx); }
+  button.b.seg.act { background:var(--rh); color:#1a1a1a; font-weight:600; }
+  button.b:disabled { opacity:.55; }
+  .choices button.right, .choices button.wrong { opacity:1; }
+  .choices button { overflow-wrap:anywhere; }
+  #qscore { margin-left:auto; }
 </style>
 </head>
 <body>
@@ -726,13 +733,14 @@ const TEST_MODE = typeof location !== 'undefined' && /[?&]test/.test(location.se
 const shouldRegisterSW = protocol => protocol === 'http:' || protocol === 'https:';
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 function loadProgress(storage) {
-  const p = { done: {}, wrong: {}, settings: { level: 3, bpm: 72 } };
+  const p = { done: {}, wrong: {}, recent: {}, settings: { level: 3, bpm: 72 } };   // recent: bài → key các câu của lần làm quiz trước
   try {
     if (storage === undefined) storage = globalThis.localStorage;
     const raw = JSON.parse(storage.getItem(STORE_KEY));
     if (!isObj(raw)) return p;
     if (isObj(raw.done)) p.done = raw.done;
     if (isObj(raw.wrong)) p.wrong = raw.wrong;
+    if (isObj(raw.recent)) for (const [k, v] of Object.entries(raw.recent)) if (Array.isArray(v)) p.recent[k] = v.filter(x => typeof x === 'string');
     if (isObj(raw.settings)) {
       const { level, bpm } = raw.settings;
       if (Number.isInteger(level) && level >= 1 && level <= 4) p.settings.level = level;
@@ -965,32 +973,261 @@ function lateTerms(text, lessonId) {
   return [...termsIn(text).map(k => GLOSSARY.find(g => g.key === k)), ...NAMED_LATER.filter(x => x.re.test(text))]
     .filter(g => g.lesson > lessonId).map(g => g.key);
 }
-function makeQuiz(lesson, rng = Math.random) {
+const rn = c => c.rootName ?? nm(c.root);
+// bảng tên nốt theo tông: viết bằng # → thăng; viết bằng b → giáng; còn lại theo tông (trưởng: G D A E B F#, thứ: E B F# C# G#)
+function tabOf(c, t) {
+  const w = (c.rootName || '') + (c.bassName || '') + (t ? t.rootName || '' : '');
+  if (/#/.test(w)) return SHARP_NAMES; if (/[A-G]b/.test(w)) return FLAT_NAMES;
+  const b = t || c, sharp = (MINISH.includes(b.type) ? [4, 11, 6, 1, 8] : [7, 2, 9, 4, 11, 6]).includes(b.root);
+  return sharp ? SHARP_NAMES : FLAT_NAMES;
+}
+const BAD_SP = /^(Cb|Fb|E#|B#)/;
+// tên nốt n theo chữ cái của hợp âm (spell); chỉ khi ra Cb/Fb/E#/B# mới dùng bảng tông
+const sp = (c, n, tab) => { const x = spell(c, n); return BAD_SP.test(x) ? tab[((n % 12) + 12) % 12] : x; };
+// tên gốc của hợp âm ở cung r, tính theo chữ cái của đích t (F#7 trước Am, không phải Gb7); strict: không viết được theo chữ cái → null
+const REL_STEP = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6];
+function relName(t, r, tab, strict = false) {
+  r = ((r % 12) + 12) % 12; const li = (LETTERS.indexOf((t.rootName ?? nm(t.root))[0]) + REL_STEP[(r - t.root + 12) % 12]) % 7;
+  const diff = ((((r - LPC[li]) % 12) + 18) % 12) - 6, x = LETTERS[li] + (diff > 0 ? '#'.repeat(diff) : 'b'.repeat(-diff));
+  return Math.abs(diff) > 1 || BAD_SP.test(x) ? (strict ? null : tab[r]) : x;
+}
+const pickFor = lessonId => (...xs) => xs.find(x => !lateTerms(x, lessonId).length) ?? xs[xs.length - 1];   // câu đầu tiên không dùng điều chưa học
+// Câu "tay phải là hợp âm gì" của hợp âm c: { ans, pool (lựa chọn sai, chưa xáo), why } hoặc null (không có hợp âm ba nốt / hợp âm tăng)
+function rhParts(c, tab, pick) {
+  const v = voicing(c), rhn = nameNotes(v.rh);
+  if (!rhn || rhn.endsWith('+')) return null;   // hợp âm tăng: ba tên cùng đúng → không hỏi
+  const m = rhn.match(/^[A-G][#b]?/)[0], r = PC[m], rs = sp(c, v.rh.find(n => n % 12 === r), tab), pool = [];
+  // một bảng 12 tên → không có hai tên cùng cao độ; tay phải không dấu thì theo dấu của gốc hợp âm (G13(#11): F#m, không phải Gbm)
+  const names = rs.includes('#') ? SHARP_NAMES : rs.includes('b') ? FLAT_NAMES : /b/.test(c.rootName || '') || c.root === 5 ? FLAT_NAMES : SHARP_NAMES;
+  const ans = names[r] + rhn.slice(m.length);
+  for (const d of [2, 5, 7, 3, 9, 1, 4]) for (const sf of ['', 'm', 'dim']) pool.push(names[(r + d) % 12] + sf);
+  pool.push(...['m', 'dim', ''].map(sf => names[r] + sf));
+  const rhNotes = v.rh.map(n => sp(c, n, tab)).join(' '), notesWhy = `Tay phải của ${c.name} là hợp âm ${ans}: các nốt ${rhNotes}.`;
+  // chỉ gọi "nốt màu" những nốt thật sự là 9, 11, 13 (kể cả biến đổi); nốt 4 của hợp âm treo không tính
+  const TENS = ['b9', '9', '#9', '#11', 'b13', '13', ...(SUS.includes(c.type) ? [] : ['11'])];
+  const tens = v.rh.filter(n => TENS.includes(degree(c, n))).map(n => `${degree(c, n)} (${sp(c, n, tab)})`);
+  const why = tens.length ? pick(`Tay phải là hợp âm ${ans} (${rhNotes}): có chứa nốt màu ${tens.join(', ')}.`, notesWhy) : notesWhy;
+  // lựa chọn sai không được là hợp âm ba nốt nằm trọn trong hợp âm (F#m7(b5) = F# A C E: tay phải Am cũng đúng, như thầy bấm)
+  const inside = x => { const k = x.match(/^[A-G][#b]?/)[0], ofs = { '':[0,4,7], m:[0,3,7], dim:[0,3,6] }[x.slice(k.length)], all = theoryPcs(c);
+    return ofs && ofs.every(o => all.has((PC[k] + o) % 12)); };
+  return { ans, pool: pool.filter(x => x !== ans && !inside(x)), why };
+}
+// Màu theo đích: kind 'maj' ("mẹ" → trưởng, hỏi ưu tiên 1), 'min' ("mẹ" → thứ), 'sub' ("bạn của mẹ"); good = loại đúng, wrong = loại sai
+const COLOUR_RULE = { maj: { good: ['dom9', 'dom13', 'lyd'], wrong: ['domb9', 'alt1', 'alt2'] }, min: { good: ['domb9', 'alt1', 'alt2'], wrong: ['dom9', 'lyd', 'sus9'] },
+  sub: { good: ['dom9', 'dom13', 'lyd'], wrong: ['domb9', 'alt1', 'alt2'] } };   // dom13 và sus4 hợp lệ trước đích thứ → không làm đáp án sai
+const colourWhy = (kind, pick) => pick(...{ min: ['Đi về hợp âm thứ nên dùng nốt màu biến đổi (b9, #9, b13), tức altered.', 'Đi về hợp âm thứ nên dùng b9, #9, b13.'],
+  maj: ['Đi về hợp âm trưởng: màu cơ bản là 9, 13 (mixolydian) hoặc 9, #11, 13 (lydian dominant); màu biến đổi là lựa chọn thứ hai.',
+        'Đi về hợp âm trưởng: màu cơ bản là 9, 13; màu biến đổi là lựa chọn thứ hai.', 'Đi về hợp âm trưởng: màu cơ bản là 9, 13.'],
+  sub: ['"Bạn của mẹ" (hợp âm át thay thế, subV) dùng nốt màu (tension) 9, #11, 13, không dùng màu biến đổi.', '"Bạn của mẹ" dùng 9, #11, 13, không dùng b9, #9, b13.'] }[kind]);
+const colourPrompt = (kind, root, to, pick) => kind === 'maj' ? pick(`${root}7 đi về ${to}: chọn màu cơ bản (ưu tiên 1)`, `${root}7 đi về ${to}: chọn màu cơ bản`)
+  : kind === 'sub' ? `${root}7 ("bạn của mẹ") đi về ${to}: chọn màu đúng` : `${root}7 đi về ${to}: chọn màu đúng`;
+// ================= CÂU TỰ SINH THEO KỸ NĂNG (thiết kế mục 10) =================
+// Mỗi dạng gắn với bài dạy nó; chỉ sinh khi "đã học tới" (upTo) bài đó. Giọng = { name, root, minor, tab, tonic }.
+// Mọi lựa chọn sai được lọc bằng chính luật hoà âm của app (harmonyOk, modalOk, số nốt chung) để chỉ đúng một đáp án.
+const SKILL_KEYS = ['C', 'G', 'F', 'D', 'Bb', 'A', 'Eb'];
+const KEY12 = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+const DEG = { maj: [0, 2, 4, 5, 7, 9, 11], min: [0, 2, 3, 5, 7, 8, 10] };
+const TRI = { maj: ['maj', 'min', 'min', 'maj', 'maj', 'min', 'm7b5'], min: ['min', 'm7b5', 'maj', 'min', 'maj', 'maj', 'maj'] };
+const SEV = { maj: ['maj7', 'm7', 'm7', 'maj7', 'dom7', 'm7', 'm7b5'], min: ['m7', 'm7b5', 'maj7', 'm7', 'dom7', 'maj7', 'dom7'] };   // giọng thứ: bậc V lấy từ thứ hoà âm
+function skillKey(name, minor = false) {
+  const root = PC[name]; if (root == null) return null;
+  const sharp = (minor ? [4, 11, 6, 1, 8] : [7, 2, 9, 4, 11, 6]).includes(root);
+  return { name, root, minor, tab: sharp ? SHARP_NAMES : FLAT_NAMES, tonic: { root, rootName: name } };
+}
+const keyLabel = k => k.name + (k.minor ? ' thứ' : '');
+const lessonTag = id => { const m = String(id).match(/^p(\d)-(\d\d)$/); return m ? `P${m[1]} · bài ${+m[2]}` : String(id); };
+// hợp âm gốc pc, loại ty, tên gốc viết theo chữ cái tính từ ref (mặc định nốt chủ của giọng)
+const inKey = (k, pc, ty, ref = k.tonic) => chord(pc, ty, null, { rootName: relName(ref, pc, k.tab) });
+const dia = (k, d, seventh = false) => { const m = k.minor ? 'min' : 'maj'; return inKey(k, k.root + DEG[m][d], (seventh ? SEV : TRI)[m][d]); };
+// dãy 5 tên nốt để đếm quãng 5; dãy có Fb/Cb/E#/B# thì không dùng (trả null)
+const cnt5 = (name, minor) => { const sc = scale5(name, minor); return sc && !sc.some(BAD5) ? sc.join(', ') : null; };
+const qual = c => MINORISH.includes(c.type) ? 'thứ' : 'trưởng';
+const SKILL_GEN = {
+  // Bài 1: nốt 7 (maj7 = gốc lùi nửa cung, hợp âm 7 = gốc lùi một cung) và nốt định hướng (bậc 3 + bậc 7)
+  tones(k, up, R, pick) {
+    const c = dia(k, R(k.minor ? [2, 4, 5] : [0, 3, 4]), true), r = c.root, r0 = rn(c), dom = c.type === 'dom7';
+    const other = chord(r, dom ? 'maj7' : 'dom7', null, { rootName: r0 }), n = (x, p) => sp(x, p, k.tab);
+    const n7 = n(c, r + (dom ? 10 : 11)), alt = n(other, r + (dom ? 11 : 10)), n3 = n(c, r + 4), n5 = n(c, r + 7);
+    const b3 = n(chord(r, 'min', null, { rootName: r0 }), r + 3), n6 = n(chord(r, 'dom13', null, { rootName: r0 }), r + 9);
+    if (R([0, 1])) return { id: 'seventh:' + c.name, prompt: `Nốt 7 của ${c.name} là nốt nào?`, answer: n7, wrong: [alt, n6, n5], textChoices: true, practice: c,
+      why: dom ? `Nốt 7 của hợp âm 7 là nốt gốc lùi một cung: ${r0} lùi một cung là ${n7}. Lùi nửa cung (${alt}) là nốt 7 của ${r0}maj7.`
+        : `Nốt 7 của maj7 là nốt gốc lùi nửa cung: ${r0} lùi nửa cung là ${n7}. Lùi một cung (${alt}) là nốt 7 của ${r0}7.` };
+    return { id: 'guide:' + c.name, prompt: `Nốt định hướng (bậc 3 và bậc 7) của ${c.name} là hai nốt nào?`, answer: `${n3} và ${n7}`,
+      wrong: [`${n3} và ${alt}`, `${b3} và ${n7}`, `${r0} và ${n5}`], textChoices: true, practice: c,
+      why: dom ? `Bậc 3 của ${c.name} là ${n3}, nốt 7 là ${n7} (${r0} lùi một cung); ${n3}–${n7} là tritone nên ${c.name} nghe bứt rứt, muốn đi tiếp.`
+        : `Bậc 3 của ${c.name} là ${n3}, nốt 7 là ${n7} (${r0} lùi nửa cung); hai nốt này cho biết đây là hợp âm maj7, nghe yên.` };
+  },
+  // Bài 2: "mẹ" (hợp âm 7) kéo về hợp âm có nốt gốc thấp hơn nó một quãng 5
+  motherTo(k, up, R, pick) {
+    const degs = k.minor ? [0, 2, 3, 4, 5, 6] : [0, 1, 2, 3, 4, 5], t = dia(k, R(degs));
+    const M = inKey(k, t.root + 7, 'dom7', t), seq = cnt5(rn(t), MINORISH.includes(t.type));
+    // lựa chọn sai: không hợp lệ sau M, và không cùng họ thay thế với đích (chung ≥ 2 nốt: A7 về F vẫn được vì F cùng họ với Dm, P4 bài 6)
+    const tp = theoryPcs(t), wrong = degs.map(d => dia(k, d)).filter(w => w.root !== t.root && !harmonyOk(M, w, undefined, k.root)
+      && [...theoryPcs(w)].filter(p => tp.has(p)).length < 2).map(w => w.name);
+    return { id: M.name + '>' + t.name, sig: M.name + '>' + t.name, prompt: `Trong giọng ${keyLabel(k)}, ${M.name} là "mẹ" của hợp âm nào?`, answer: t.name, wrong: shuf(wrong, R).slice(0, 3), practice: M,
+      why: `${M.name} là "mẹ" của ${t.name}: nốt gốc ${rn(M)} cao hơn ${rn(t)} một quãng 5${seq ? ` (từ ${rn(t)} đếm lên 5 tên nốt: ${seq})` : ''}, nên ${M.name} kéo về ${t.name}.` };
+  },
+  // Bài 9: "mẹ" của từng hợp âm trong giọng; "mẹ" luôn là hợp âm 7, dù đích trưởng hay thứ
+  motherOf(k, up, R, pick) {
+    if (k.minor) return null;
+    const d = R([0, 1, 2, 3, 4, 5]), t = dia(k, d, d !== 4 && R([0, 1]) === 1), M = inKey(k, t.root + 7, 'dom7', t), seq = cnt5(rn(t), MINORISH.includes(t.type));
+    const doms = shuf([2, 9, 5, 3].map(o => inKey(k, t.root + o, 'dom7', t)), R);   // bỏ đích+4 ("mẹ" của hợp âm thay thế) và đích+10 (hợp âm 7 cửa sau)
+    const wrong = [inKey(k, t.root + 7, 'm7', t), ...doms].filter(x => !harmonyOk(x, t) && x.name !== M.name).map(x => x.name).slice(0, 3);
+    return { id: 'of:' + t.name, prompt: `Hợp âm nào kéo về ${t.name} ("mẹ" của ${t.name})?`, answer: M.name, wrong, practice: M,
+      why: `${seq ? `Từ ${rn(t)} đếm lên 5 tên nốt (${seq}): nốt thứ năm` : `Nốt cao hơn ${rn(t)} một quãng 5`} là ${rn(M)}, nên "mẹ" của ${t.name} là ${M.name}. ` +
+        `${t.name} ở bậc ${d + 1} của giọng ${k.name} ("1-4-5 trưởng, 2-3-6 thứ"), nhưng "mẹ" luôn là hợp âm 7, dù đích là hợp âm ${qual(t)}.` };
+  },
+  // Bài 9: hợp âm trong giọng theo bậc: 1-4-5 trưởng, 2-3-6 thứ, 7 là m7b5
+  degree(k, up, R, pick) {
+    if (k.minor) return null;
+    const d = R([0, 1, 2, 3, 4, 5, 6]), a = dia(k, d), flip = inKey(k, a.root, a.type === 'maj' ? 'min' : 'maj');
+    const names = Array.from({ length: d + 1 }, (_, i) => rn(dia(k, i))).join(', ');
+    return { id: 'deg' + (d + 1), prompt: `Trong giọng ${k.name}, hợp âm ở bậc ${d + 1} là hợp âm gì?`, answer: a.name, practice: a,
+      wrong: [flip.name, dia(k, (d + 1) % 7).name, dia(k, (d + 6) % 7).name],
+      why: `Đếm từ ${k.name}: ${names}, bậc ${d + 1} là ${rn(a)}. Mẹo "1-4-5 trưởng, 2-3-6 thứ, 7 là m7b5", nên bậc ${d + 1} là ${a.name}.` };
+  },
+  // Bài 11: hợp âm thay thế chung ba nốt (Cmaj7 ↔ Em7, Am7; Fmaj7 ↔ Dm7; G7 ↔ Bm7b5)
+  subst(k, up, R, pick) {
+    if (k.minor) return null;
+    const [yd, group] = R([[0, [2, 5]], [3, [1]], [4, [6]]]), Y = dia(k, yd, true), A = dia(k, R(group), true), yp = theoryPcs(Y);
+    const shared = x => [...theoryPcs(x)].filter(p => yp.has(p));
+    const okW = x => shared(x).length <= 1 && !(isDomT(x) && [(Y.root + 7) % 12, (Y.root + 1) % 12].includes(x.root)) && x.name !== A.name;
+    const diaW = shuf([0, 1, 2, 3, 4, 5, 6].map(d => dia(k, d, true)).filter(okW), R), out = [];
+    for (let r = 0; r < 12; r++) for (const ty of ['m7', 'maj7', 'dom7']) { const x = inKey(k, Y.root + r, ty, Y); if (okW(x)) out.push(x); }
+    const wrong = [...new Set([...diaW, ...shuf(out, R)].map(x => x.name))].slice(0, 3);
+    const notes = shared(A).sort((a, b) => ((a - Y.root + 12) % 12) - ((b - Y.root + 12) % 12)).map(p => sp(Y, p, k.tab)).join(', ');
+    return { id: A.name + '=' + Y.name, prompt: `Hợp âm nào thay được ${Y.name} (hợp âm thay thế)?`, answer: A.name, wrong, practice: A,
+      why: `${A.name} chung 3 nốt ${notes} với ${Y.name}, nên đặt vào chỗ ${Y.name} vẫn nghe hợp lý. Mẹo: hai hợp âm trong giọng có nốt gốc cách nhau một quãng 3 (${rn(A)} và ${rn(Y)}) chung 3 nốt nên thay được nhau.` };
+  },
+  // Bài 14 (đích trưởng; bài 13 dạy ưu tiên nhưng 7(#9 b13) có từ bài 14), 17 (đích thứ, đủ ba màu sai đã học), 22 ("bạn của mẹ")
+  colourK(k, up, R, pick) {
+    const kinds = ['maj', ...(up >= 'p3-17' ? ['min'] : []), ...(up >= 'p3-22' ? ['sub'] : [])], kind = R(kinds);
+    const degs = (k.minor ? [0, 2, 3, 4, 5, 6] : [0, 1, 2, 3, 4, 5]).filter(d => kind === 'sub' || (kind === 'min') === MINORISH.includes(dia(k, d).type));
+    const t = dia(k, R(degs)), root = t.root + (kind === 'sub' ? 1 : 7), r0 = relName(t, root, k.tab);
+    const good = COLOUR_RULE[kind].good.filter(ty => ty !== 'lyd' || up >= 'p3-16'), A = chord(root, R(good), null, { rootName: r0 });
+    return { id: `${kind}:${A.name}>${t.name}`, prompt: colourPrompt(kind, r0, t.name, pick), answer: A.name, practice: A,
+      wrong: COLOUR_RULE[kind].wrong.map(ty => chord(root, ty, null, { rootName: r0 }).name), why: colourWhy(kind, pick) };
+  },
+  // Bài 16: tay phải là hợp âm ba nốt phía trên (G13(#11) = G7 + hợp âm A); thêm 9sus4 (bài 17), "bạn của mẹ" (22), dim7 (24), 7(#9 b13) (P4 bài 6)
+  rhK(k, up, R, pick) {
+    const t = dia(k, R(k.minor ? [0, 2, 3, 5] : [0, 1, 2, 3, 4, 5])), V = k.root + 7, opts = [
+      () => inKey(k, V, 'lyd'), () => dia(k, 6, true),
+      ...(MINORISH.includes(t.type) ? [] : [() => inKey(k, t.root + 7, 'lyd', t)]),
+      ...(up >= 'p3-17' && !MINORISH.includes(t.type) ? [() => inKey(k, t.root + 7, 'sus9', t)] : []),   // chỉ 9sus4 trước đích trưởng (bài 17); 7sus4(b9) chưa dạy dưới tên này
+      ...(up >= 'p3-22' ? [() => inKey(k, t.root + 1, 'lyd', t)] : []),
+      ...(up >= 'p3-24' ? [() => inKey(k, t.root - 1, 'dim7', t)] : []),
+      ...(up >= 'p4-06' && MINORISH.includes(t.type) ? [() => inKey(k, t.root + 7, 'alt1', t)] : [])];
+    const c = R(opts)(), p = rhParts(c, k.tab, pick); if (!p) return null;
+    return { id: c.name, prompt: `Tay phải của ${c.name} là hợp âm gì?`, answer: p.ans, wrong: shuf(p.pool, R).slice(0, 3), why: p.why, practice: c, hand: true };
+  },
+  // Bài 19: hợp âm mượn từ giọng thứ cùng tên (Dm7b5, Ebmaj7, Fm7, Abmaj7, Bb7, Fm trong giọng C)
+  borrow(k, up, R, pick) {
+    if (k.minor) return null;
+    const cands = [[5, 'm7'], [3, 'maj7'], [8, 'maj7'], [10, 'dom7'], [2, 'm7b5'], [5, 'min']]
+      .map(([o, ty]) => { const nmx = relName(k.tonic, k.root + o, k.tab, true); return nmx && chord(k.root + o, ty, null, { rootName: nmx }); }).filter(Boolean);
+    const A = R(cands), dias = [0, 1, 2, 3, 4, 5, 6].map(d => dia(k, d, true)).filter(x => !modalOk(x, k.root));
+    const same = dias.filter(x => x.root === A.root), wrong = [...same, ...shuf(dias.filter(x => x.root !== A.root), R)].map(x => x.name).slice(0, 3);
+    const outs = [...chordTones(A)].filter(p => !MAJ_PCS.includes(((p - k.root) % 12 + 12) % 12)).sort((a, b) => ((a - k.root + 12) % 12) - ((b - k.root + 12) % 12)).map(p => sp(A, p, k.tab)).join(', ');
+    return { id: A.name, prompt: `Bài giọng ${k.name} trưởng: hợp âm nào là hợp âm mượn từ ${k.name} thứ?`, answer: A.name, wrong, practice: A,
+      why: `${A.name} có nốt ${outs} mà ${k.name} trưởng không có; đó là nốt của ${k.name} thứ, nên ${A.name} là hợp âm mượn. Các hợp âm kia chỉ dùng nốt của ${k.name} trưởng.` };
+  },
+  // Bài 22: "bạn của mẹ" (subV) = hợp âm 7 trên nốt gốc của đích nhích lên nửa cung
+  friend(k, up, R, pick) {
+    const t = dia(k, R(k.minor ? [0, 2, 3, 4, 5, 6] : [0, 1, 2, 3, 4, 5])), F = inKey(k, t.root + 1, 'dom7', t), M = inKey(k, t.root + 7, 'dom7', t);
+    const doms = shuf([2, 11, 5].map(o => inKey(k, t.root + o, 'dom7', t)), R);
+    const wrong = [inKey(k, t.root + 1, 'm7', t), ...doms].filter(x => !harmonyOk(x, t)).map(x => x.name).slice(0, 3);
+    return { id: 'sub:' + t.name, prompt: `"Bạn của mẹ" của ${t.name} là hợp âm nào?`, answer: F.name, wrong, practice: F,
+      why: `"Bạn của mẹ" chung tritone với "mẹ" ${M.name}, và nốt gốc là nốt gốc của ${t.name} nhích lên nửa cung: ${rn(t)} lên nửa cung là ${rn(F)}. ${F.name} trượt xuống nửa cung về ${t.name}.` };
+  },
+  // Bài 24: hợp âm giảm đi qua = nốt gốc của hợp âm sau lùi nửa cung (Cmaj7 – C#dim7 – Dm7)
+  dim(k, up, R, pick) {
+    if (k.minor) return null;
+    const [a, b] = R([[0, 1], [1, 2], [3, 4], [4, 5]]), X = dia(k, a, true), Y = dia(k, b, true), D = inKey(k, Y.root - 1, 'dim7', Y);
+    // không dùng Ydim7 làm lựa chọn sai: đó là hợp âm giảm chung nốt, vẫn dùng được trong jazz
+    const wrong = [chord(D.root, 'm7b5', null, { rootName: rn(D) }), chord(D.root, 'm7', null, { rootName: rn(D) }), chord(D.root, 'dom7', null, { rootName: rn(D) })]
+      .filter(x => !harmonyOk(x, Y)).map(x => x.name);
+    return { id: X.name + '>' + Y.name, prompt: `${X.name} – ? – ${Y.name}: chỗ ? là hợp âm giảm đi qua nào?`, answer: D.name, wrong, practice: D, prog: [X.name, D.name, Y.name],
+      why: `Hợp âm giảm đi qua có nốt gốc là nốt gốc của hợp âm sau lùi nửa cung: ${rn(Y)} lùi nửa cung là ${rn(D)}. Bass đi ${rn(X)}, ${rn(D)}, ${rn(Y)}, mỗi bước một phím liền nhau.` };
+  },
+  // Bài 25: "chị" (II liên quan) đứng trước "mẹ" thành II–V; đích thứ thì "chị" m7b5, "mẹ" altered
+  sister(k, up, R, pick) {
+    const t = dia(k, R(k.minor ? [0, 2, 3, 5] : [0, 1, 2, 3, 4, 5])), minT = MINORISH.includes(t.type);
+    const M = inKey(k, t.root + 7, minT ? 'domb9' : 'dom7', t), S = inKey(k, t.root + 2, minT ? 'm7b5' : 'm7', t);
+    const cands = shuf([[2, 'maj7'], [9, 'm7'], [4, 'm7'], [7, 'm7'], [11, 'm7b5']].map(([o, ty]) => inKey(k, t.root + o, ty, t)), R);
+    const wrong = cands.filter(x => !harmonyOk(x, M) && !(x.root === S.root && ['m7', 'm7b5'].includes(x.type))).map(x => x.name).slice(0, 3);
+    return { id: 'chi:' + t.name, prompt: `II–V vào ${t.name}: ? – ${M.name} – ${t.name}. Chỗ ? là "chị" nào?`, answer: S.name, wrong, practice: S, prog: [S.name, M.name, t.name],
+      why: `"Chị" đứng trước "mẹ" ${M.name} thành cặp II–V; nốt gốc của "chị" là nốt gốc của ${t.name} lên một cung: ${rn(t)} lên một cung là ${rn(S)}.` +
+        (minT ? ` ${t.name} là hợp âm thứ nên "chị" dùng m7b5 và "mẹ" dùng màu biến đổi.` : ` ${t.name} là hợp âm trưởng nên "chị" là m7.`) };
+  },
+};
+const isDomT = x => DOM_ALL.includes(x.type);
+const shuf = (a, R) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = R(Array.from({ length: i + 1 }, (_, n) => n)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+// Dạng câu tự sinh, theo thứ tự bài dạy (nhãn dùng cho menu tab Đố)
+const SKILLS = [
+  { id: 'tones', lesson: 'p3-01', label: 'Nốt 7 và nốt định hướng' },
+  { id: 'motherTo', lesson: 'p3-02', label: '"Mẹ" hút về đâu' },
+  { id: 'motherOf', lesson: 'p3-09', label: 'Hợp âm nào hút về X' },
+  { id: 'degree', lesson: 'p3-09', label: 'Bậc trong giọng' },
+  { id: 'subst', lesson: 'p3-11', label: 'Hợp âm thay thế' },
+  { id: 'colourK', lesson: 'p3-14', label: 'Màu hợp với đích' },   // bài 14: đủ tên các màu biến đổi (7(#9 b13), 7(b9 b13)) dùng làm lựa chọn
+  { id: 'rhK', lesson: 'p3-16', label: 'Tay phải là hợp âm gì' },
+  { id: 'borrow', lesson: 'p3-19', label: 'Hợp âm mượn' },
+  { id: 'friend', lesson: 'p3-22', label: '"Bạn của mẹ"' },
+  { id: 'dim', lesson: 'p3-24', label: 'Hợp âm giảm' },
+  { id: 'sister', lesson: 'p3-25', label: '"Chị"' },
+];
+const SKILL_IDS = SKILLS.map(s => s.id);
+const QUIZ_ORDER = ['concept', ...SKILL_IDS, 'before', 'slot', 'colour', 'rh', 'play'];   // thứ tự câu trong quiz cuối bài (câu bấm đàn luôn cuối)
+// Một câu tự sinh: dạng kind, giọng key (skillKey), đã học tới bài upTo (null = không giới hạn). Không sinh được → null.
+// Trả về { key, kind, prompt, answer, choices (4, xáo), why, practice? (hợp âm để bấm thử), textChoices? (lựa chọn là tên nốt), prog? (tiến hành để nghe sau khi đáp) }
+function skillQuestion(kind, key, upTo, rng = Math.random) {
+  const s = SKILLS.find(x => x.id === kind); if (!s || !key || (upTo && s.lesson > upTo)) return null;
+  const R = xs => xs[Math.floor(rng() * xs.length) % xs.length];
+  const raw = SKILL_GEN[kind](key, upTo || 'p9-99', R, pickFor(upTo));
+  if (!raw || raw.wrong.length !== 3) return null;
+  const choices = [raw.answer, ...raw.wrong]; if (new Set(choices).size !== 4) return null;
+  return { key: `${kind}:${key.name}${key.minor ? 'm' : ''}:${raw.id}`, kind, skill: kind, keyName: keyLabel(key), prompt: raw.prompt, answer: raw.answer,
+    choices: shuf(choices, R), why: raw.why, ...(raw.practice ? { practice: raw.practice } : {}), ...(raw.textChoices ? { textChoices: true } : {}), ...(raw.hand ? { hand: true } : {}), ...(raw.prog ? { prog: raw.prog } : {}) };
+}
+// Tên hợp âm trong đề, để nhận ra hai câu "cùng ý": cùng đáp án và đề chung ít nhất một tên hợp âm
+const CHORD_TOK = /(?<![\p{L}\p{N}#])[A-G][#b]?(?:[a-zA-Z0-9+°#]*(?:\([^)]*\))?)?(?:\/[A-G][#b]?)?(?![\p{L}\p{N}])/gu;
+const promptChords = t => [...String(t).matchAll(CHORD_TOK)].map(m => parseSymbol(m[0])).filter(Boolean).map(c => c.name);
+const sameIdea = (a, b) => a.answer === b.answer && promptChords(a.prompt).some(n => promptChords(b.prompt).includes(n));
+// Dạng câu tự sinh gần với bài: dạng bài dạy + dạng ứng với mục bài tập (dim7 → hợp âm giảm, "mẹ" → hợp âm nào hút về X, mượn, thay thế…)
+function focusKinds(lesson) {
+  const f = new Set(SKILLS.filter(s => s.lesson === lesson.id).map(s => s.id));
+  for (const it of lesson.items || []) {
+    const c = parseSymbol(it.chord), t = it.to ? parseSymbol(it.to) : null; if (!c) continue;
+    if (it.rel === 'modal') f.add('borrow'); else if (it.rel === 'sub') f.add('subst');
+    else if (t && c.bass == null) { const d = (c.root - t.root + 12) % 12;
+      if (c.type === 'dim7') f.add('dim');
+      else if (DOM_ALL.includes(c.type) && d === 7) { f.add('motherOf'); if (COLF.includes(c.type)) f.add('colourK'); }
+      else if (DOM_ALL.includes(c.type) && d === 1) { f.add('friend'); if (COLF.includes(c.type)) f.add('colourK'); }
+      else if (['m7', 'm7b5'].includes(c.type)) f.add('sister'); }
+    if (['lyd', 'sus9', 'alt1', 'm7b5'].includes(c.type)) f.add('rhK');
+  }
+  return f;
+}
+// Kho câu tự sinh cho một bài: n câu khác nhau (khác key và khác ý), ~2/3 giọng C, ~1/3 giọng G F D Bb A Eb; dạng gần bài (focus) được chọn nhiều gấp 3
+function skillBank(upTo, rng = Math.random, n = 12, focus = new Set()) {
+  const kinds = SKILLS.filter(s => s.lesson <= upTo); if (!kinds.length) return [];
+  const w = kinds.flatMap(s => s.lesson === upTo || focus.has(s.id) ? [s, s, s] : [s]), out = [], seen = new Set();
+  const own = kinds.filter(s => s.lesson === upTo);   // dạng của chính bài: lấy trước 3 câu để quiz luôn có câu dạng đó
+  for (let a = 0; a < n * 15 && out.length < n; a++) {
+    const s = own.length && a < 40 && out.length < 3 ? own[a % own.length] : w[Math.floor(rng() * w.length) % w.length], kn = rng() < 2 / 3 ? 'C' : SKILL_KEYS[1 + Math.floor(rng() * 6) % 6];
+    const q = skillQuestion(s.id, skillKey(kn), upTo, rng);
+    if (q && !seen.has(q.key) && !out.some(o => sameIdea(o, q))) { seen.add(q.key); out.push(q); }
+  }
+  return out;
+}
+function makeQuiz(lesson, rng = Math.random, opts = {}) {
   const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const concepts = [], befores = [], slots = [], colours = [], rhs = [], plays = [];
   const key = keyOf(lesson), kObj = lesson.key != null ? parseSymbol(lesson.key) : null, kn = kObj ? kObj.name : 'C';
   const mk = (kind, c, prompt, answer, why, choices) => ({ key: `${lesson.id}:${kind}:${c.name}`, item: curItem, kind, prompt, answer, chord: c, why, ...(choices ? { choices: shuffle(choices) } : {}) });
   const uniq = (answer, cands) => { const out = [answer]; for (const x of cands) if (out.length < 4 && !out.includes(x)) out.push(x); return out; };
-  const rn = c => c.rootName ?? nm(c.root);
-  // bảng tên nốt theo tông: viết bằng # → thăng; viết bằng b → giáng; còn lại theo tông (trưởng: G D A E B F#, thứ: E B F# C# G#)
-  const tabOf = (c, t) => {
-    const w = (c.rootName || '') + (c.bassName || '') + (t ? t.rootName || '' : '');
-    if (/#/.test(w)) return SHARP_NAMES; if (/[A-G]b/.test(w)) return FLAT_NAMES;
-    const b = t || c, sharp = (MINISH.includes(b.type) ? [4, 11, 6, 1, 8] : [7, 2, 9, 4, 11, 6]).includes(b.root);
-    return sharp ? SHARP_NAMES : FLAT_NAMES;
-  };
-  const BAD_SP = /^(Cb|Fb|E#|B#)/;
-  // tên nốt n theo chữ cái của hợp âm (spell); chỉ khi ra Cb/Fb/E#/B# mới dùng bảng tông
-  const sp = (c, n, tab) => { const x = spell(c, n); return BAD_SP.test(x) ? tab[((n % 12) + 12) % 12] : x; };
-  // tên gốc của hợp âm ở cung r, tính theo chữ cái của đích t (F#7 trước Am, không phải Gb7)
-  const REL_STEP = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6];
-  const relName = (t, r, tab) => {
-    r = ((r % 12) + 12) % 12; const li = (LETTERS.indexOf((t.rootName ?? nm(t.root))[0]) + REL_STEP[(r - t.root + 12) % 12]) % 7;
-    const diff = ((((r - LPC[li]) % 12) + 18) % 12) - 6, x = LETTERS[li] + (diff > 0 ? '#'.repeat(diff) : 'b'.repeat(-diff));
-    return Math.abs(diff) > 1 || BAD_SP.test(x) ? tab[r] : x;
-  };
   let curItem = null;
-  const pick = (...xs) => xs.find(x => !lateTerms(x, lesson.id).length) ?? xs[xs.length - 1];   // câu đầu tiên không dùng điều chưa học
+  const pick = pickFor(lesson.id);
   const isDom = x => DOMF.includes(x.type) || ['alt1', 'alt2', 'sus4'].includes(x.type);
   (Array.isArray(lesson.quiz) ? lesson.quiz : []).forEach((x, i) => {
     if (x && Array.isArray(x.choices) && x.choices.includes(x.answer))
@@ -1070,41 +1307,49 @@ function makeQuiz(lesson, rng = Math.random) {
         const minT = MINISH.includes(t.type), mother = c.root === (tr + 7) % 12, friend = c.root === (tr + 1) % 12;
         // một đáp án đúng: "bạn của mẹ" → 13(#11)/9/13 (sai = altered); "mẹ" → thứ: altered (sai = 9/13/13(#11));
         // "mẹ" → trưởng: hỏi màu cơ bản ưu tiên 1 9/13/13(#11) (sai = altered); màu biến đổi về đích trưởng là lựa chọn 2 → không hỏi
-        const ALT = ['domb9', 'alt1', 'alt2'], NAT = ['dom9', 'dom13', 'lyd'];
         const kind = friend ? 'sub' : mother ? (minT ? 'min' : 'maj') : null;
-        const good = { sub: NAT, min: ALT, maj: NAT }[kind];
-        if (good && good.includes(c.type)) {
-          const wrong = kind === 'min' ? ['dom9', 'lyd', 'sus9'] : ALT;   // dom13 và sus4 hợp lệ trước đích thứ → không làm đáp án sai
-          const w = pick(...{ min: ['Đi về hợp âm thứ nên dùng nốt màu biến đổi (b9, #9, b13), tức altered.', 'Đi về hợp âm thứ nên dùng b9, #9, b13.'],
-            maj: ['Đi về hợp âm trưởng: màu cơ bản là 9, 13 (mixolydian) hoặc 9, #11, 13 (lydian dominant); màu biến đổi là lựa chọn thứ hai.',
-                  'Đi về hợp âm trưởng: màu cơ bản là 9, 13; màu biến đổi là lựa chọn thứ hai.', 'Đi về hợp âm trưởng: màu cơ bản là 9, 13.'],
-            sub: ['"Bạn của mẹ" (hợp âm át thay thế, subV) dùng nốt màu (tension) 9, #11, 13, không dùng màu biến đổi.', '"Bạn của mẹ" dùng 9, #11, 13, không dùng b9, #9, b13.'] }[kind]);
+        if (kind && COLOUR_RULE[kind].good.includes(c.type)) {
+          const wrong = COLOUR_RULE[kind].wrong, w = colourWhy(kind, pick);
           const nameOf = ty => chord(c.root, ty, null, { rootName: c.rootName }).name;
           colours.push(mk('colour', c, kind === 'maj' ? pick(`${rn(c)}7 đi về ${it.to}: chọn màu cơ bản (ưu tiên 1)`, `${rn(c)}7 đi về ${it.to}: chọn màu cơ bản`) : `${rn(c)}7 đi về ${it.to}: chọn màu đúng`,
             c.name, w, [c.name, ...wrong.map(nameOf)]));
         }
       }
     }
-    const v = voicing(c), rhn = nameNotes(v.rh);
-    let ans = null;
-    if (rhn && !rhn.endsWith('+')) {   // hợp âm tăng: ba tên cùng đúng → không hỏi
-      const m = rhn.match(/^[A-G][#b]?/)[0], r = PC[m], rs = sp(c, v.rh.find(n => n % 12 === r), tab), pool = [];
-      const names = rs.includes('#') ? SHARP_NAMES : rs.includes('b') ? FLAT_NAMES : tab;   // một bảng 12 tên → không có hai tên cùng cao độ
-      ans = names[r] + rhn.slice(m.length);
-      for (const d of [2, 5, 7, 3, 9, 1, 4]) for (const sf of ['', 'm', 'dim']) pool.push(names[(r + d) % 12] + sf);
-      pool.push(...['m', 'dim', ''].map(sf => names[r] + sf));
-      const rhNotes = v.rh.map(n => sp(c, n, tab)).join(' '), notesWhy = `Tay phải của ${c.name} là hợp âm ${ans}: các nốt ${rhNotes}.`;
-      // chỉ gọi "nốt màu" những nốt thật sự là 9, 11, 13 (kể cả biến đổi); nốt 4 của hợp âm treo không tính
-      const TENS = ['b9', '9', '#9', '#11', 'b13', '13', ...(SUS.includes(c.type) ? [] : ['11'])];
-      const tens = v.rh.filter(n => TENS.includes(degree(c, n))).map(n => `${degree(c, n)} (${sp(c, n, tab)})`);
-      const why = tens.length ? pick(`Tay phải là hợp âm ${ans} (${rhNotes}): có chứa nốt màu ${tens.join(', ')}.`, notesWhy) : notesWhy;
-      // lựa chọn sai không được là hợp âm ba nốt nằm trọn trong hợp âm (F#m7(b5) = F# A C E: tay phải Am cũng đúng, như thầy bấm)
-      const inside = x => { const k = x.match(/^[A-G][#b]?/)[0], ofs = { '':[0,4,7], m:[0,3,7], dim:[0,3,6] }[x.slice(k.length)], all = theoryPcs(c);
-        return ofs && ofs.every(o => all.has((PC[k] + o) % 12)); };
-      rhs.push(mk('rh', c, `Tay phải của ${c.name} là hợp âm gì?`, ans, why, uniq(ans, shuffle(pool.filter(x => x !== ans && !inside(x))))));
-    }
+    const v = voicing(c), rp = rhParts(c, tab, pick), ans = rp ? rp.ans : null;
+    if (rp) rhs.push(mk('rh', c, `Tay phải của ${c.name} là hợp âm gì?`, ans, rp.why, uniq(ans, shuffle(rp.pool))));
     plays.push(mk('play', c, `Bấm ${c.name}`, c.name,
       `Tay trái: ${v.lh.map(n => sp(c, n, tab)).join(' + ')} · tay phải: ${ans ? 'hợp âm ' + ans : 'nốt ' + v.rh.map(n => sp(c, n, tab)).join(' ')}`));
+  }
+  // Bài thật của khoá (P3, P4): kho = câu thầy viết + câu từ bài tập + câu tự sinh theo kỹ năng (≥ 12 câu khác nhau);
+  // rút 5 câu: luôn có 1 câu bấm (từ mục bài tập) và 1 câu "chỗ ?" nếu có, 1 câu thầy viết nếu còn câu chưa gặp; còn lại xáo, đủ dạng;
+  // tránh các câu của lần trước (opts.recent) khi kho còn đủ câu chưa gặp
+  if ((lesson.part === 3 || lesson.part === 4) && /^p[34]-\d\d$/.test(String(lesson.id))) {
+    const have = [...concepts, ...befores, ...slots, ...colours, ...rhs], focus = focusKinds(lesson);   // câu tự sinh trùng đề hoặc cùng ý với câu sẵn có thì bỏ
+    const skills = skillBank(lesson.id, rng, 12, focus).filter(q => !have.some(h => h.prompt === q.prompt || sameIdea(h, q))).map(q => ({ ...q, key: `${lesson.id}:${q.key}` }));
+    const bank = dedupKeys([...concepts, ...skills, ...befores, ...slots, ...colours, ...rhs, ...plays]);
+    if (opts.bank) return bank;
+    const recent = new Set(Array.isArray(opts.recent) ? opts.recent : []), R = xs => xs[Math.floor(rng() * xs.length) % xs.length];
+    const fresh = xs => { const f = xs.filter(x => !recent.has(x.key)); return f.length ? f : xs; }, out = [];
+    const of = kind => bank.filter(x => x.kind === kind), take = x => { if (x && !out.includes(x)) out.push(x); };
+    take(R(fresh(of('play'))));
+    if (of('slot').length) take(R(fresh(of('slot'))));
+    const newConcepts = of('concept').filter(x => !recent.has(x.key)); if (newConcepts.length) take(R(newConcepts));
+    // bài dạy một dạng tự sinh: luôn có ≥ 1 câu dạng đó
+    const own = skills.filter(x => SKILLS.find(s => s.id === x.kind).lesson === lesson.id); if (own.length) take(R(fresh(own)));
+    // câu tự sinh tối đa 2 (P3) / 1 (P4) mỗi quiz; dạng xa bài xếp sau dạng gần bài
+    const cap = lesson.part === 4 ? 1 : 2, isSk = x => SKILL_IDS.includes(x.kind), capOk = x => !isSk(x) || out.filter(isSk).length < cap;
+    const far = x => isSk(x) && !focus.has(x.kind) ? 1 : 0, rest = bank.filter(x => x.kind !== 'play' && !out.includes(x));
+    const pool = [...shuffle(rest.filter(x => !recent.has(x.key))).sort((a, b) => far(a) - far(b)), ...shuffle(rest.filter(x => recent.has(x.key)))];
+    while (out.length < 5 && pool.length) {
+      const fresh1 = x => !recent.has(x.key) && !out.some(o => sameIdea(o, x));
+      let j = pool.findIndex(x => capOk(x) && fresh1(x) && !out.some(o => o.kind === x.kind));   // câu chưa gặp, dạng chưa có
+      if (j < 0) j = pool.findIndex(x => capOk(x) && fresh1(x));
+      if (j < 0) j = pool.findIndex(fresh1);   // hết câu chưa gặp trong giới hạn: thêm câu tự sinh còn hơn lặp câu cũ
+      if (j < 0) j = pool.findIndex(capOk);
+      take(pool.splice(j < 0 ? 0 : j, 1)[0]);
+    }
+    return out.sort((a, b) => QUIZ_ORDER.indexOf(a.kind) - QUIZ_ORDER.indexOf(b.kind));
   }
   let out = [...concepts, ...befores, ...slots, ...colours, ...rhs, ...plays].slice(0, 5);
   // giữ chỗ: mỗi dạng còn tồn tại (play, colour, rh) phải có mặt; thế chỗ câu cuối thuộc dạng đang dư,
@@ -1121,10 +1366,14 @@ function makeQuiz(lesson, rng = Math.random) {
   }
   out.sort((a, b) => QUIZ_KINDS.indexOf(a.kind) - QUIZ_KINDS.indexOf(b.kind));
   for (let i = 0; out.length < 3 && plays.length; i++) out.push(plays[i % plays.length]);
-  const seen = {};   // key không trùng trong một quiz (câu đệm, hợp âm lặp)
-  out = out.map(x => { const n = seen[x.key] = (seen[x.key] || 0) + 1; return n > 1 ? { ...x, key: `${x.key}#${n}` } : x; });
-  return out;
+  return dedupKeys(out);
 }
+// recent của một bài: key câu của hai lần làm gần nhất (lần mới trước), tối đa 10 key
+const nextRecent = (old, qs) => [...new Set([...qs.map(q => q.key), ...(Array.isArray(old) ? old : [])])].slice(0, 10);
+// câu tự sinh sai: đếm theo dạng (key câu tự sinh ngẫu nhiên, đếm theo key sẽ làm bộ nhớ phình)
+const wrongKey = q => q.skill ? 'skill:' + q.kind : q.key;
+// key không trùng trong một quiz (câu đệm, hợp âm lặp): lần thứ n của cùng key thành key#n
+function dedupKeys(xs) { const seen = {}; return xs.map(x => { const n = seen[x.key] = (seen[x.key] || 0) + 1; return n > 1 ? { ...x, key: `${x.key}#${n}` } : x; }); }
 
 // Kiểm nhạc lý cho mục bài tập (thuần): mỗi mục phải khớp một luật, không thì báo "<id>: <chord> → <to>".
 // Họ dominant: gốc = đích+7 ("mẹ") hoặc đích+1 ("bạn của mẹ"); sus chỉ ở chỗ "mẹ". Màu theo sổ tay (bài 16, 17, 21, 23, 24):
@@ -1417,6 +1666,8 @@ async function withFakeAudio(fn) {
     Object.keys(pianoBufs).forEach(k => delete pianoBufs[k]); Object.assign(pianoBufs, keepBufs); }
 }
 const eq = (a, b) => { if (a !== b) throw `ra "${a}", cần "${b}"`; };
+// rng có seed, bỏ vài số đầu (số đầu của seed nhỏ gần 0 nên lần chọn đầu luôn ra phần tử đầu)
+const seededRng = seed => { let v = (seed * 7919) % 2147483647 || 1; const f = () => (v = (v * 16807) % 2147483647) / 2147483647; for (let i = 0; i < 4; i++) f(); return f; };
 const ok = (v, msg) => { if (!v) throw msg; };
 // Test chung cho mỗi đợt bài P4 (không fast: lặp makeQuiz trên nhiều bài × nhiều seed)
 const p4Batch = (task, a, b) => ({ name:`GĐ4-T${task}: Phildave 4 bài ${a}–${b} đủ, đúng nguồn, có ví dụ, có câu "chỗ ?"`, fn() {
@@ -2066,7 +2317,9 @@ p4Batch(7, 30, 32),
     loadLessons().lessons.filter(l => l.part === 4).forEach(l => {
       for (const seed of [1, 7, 42, 99, 2024]) { const rng = (s => () => (s = (s * 16807) % 2147483647) / 2147483647)(seed);
         // câu "tay phải là hợp âm gì" hỏi tên hợp âm ba nốt của một tay (Edim, Am, C) — tên tay, không phải ký hiệu hợp âm đầy đủ
-        const readable = (q, c) => q.kind === 'rh' ? /^[A-G][#b]?(m|dim)?$/.test(c) && PC[c.match(/^[A-G][#b]?/)[0]] != null : !!parseSymbol(c);
+        // câu tự sinh: "tay phải" (hand) cũng là tên hợp âm ba nốt; lựa chọn là tên nốt (textChoices: "B và F") thì mỗi tên nốt phải đọc được
+        const readable = (q, c) => q.kind === 'rh' || q.hand ? /^[A-G][#b]?(m|dim)?$/.test(c) && PC[c.match(/^[A-G][#b]?/)[0]] != null
+          : q.textChoices ? c.split(' và ').every(n => PC[n] != null) : !!parseSymbol(c);
         makeQuiz(l, rng).forEach(q => { (q.choices || []).forEach(c => { if (q.kind !== 'concept' && !readable(q, c)) bad.push(`${l.id} ${q.kind}: ${c}`); });
           if (!q.why) bad.push(`${l.id} ${q.kind}: thiếu why`); }); }
       // lời giảng, mẹo, ghi nhớ, câu hỏi viết sẵn: không viết tắt kiểu "(B trên C)", không "7 trơn"
@@ -2097,6 +2350,136 @@ p4Batch(7, 30, 32),
 { fast:1, name:'GĐ4-T8: tiêu đề và câu hỏi hiểu không trùng giữa các bài P3, P4', fn() {
     const ls = loadLessons().lessons, dup = xs => xs.filter((x, i) => xs.indexOf(x) !== i);
     eq(dup(ls.map(l => l.title)).join('; '), ''); eq(dup(ls.flatMap(l => l.quiz.map(q => q.q))).join('; '), ''); } },
+{ name:'Kho câu hỏi A1: mọi dạng câu tự sinh × 12 giọng trưởng (+ giọng thứ) × 30 seed: đúng một đáp án theo oracle độc lập + bảng đáp án viết tay, loại hợp âm đã có trong bài, 4 lựa chọn khác nhau, tên đúng, có why, không dùng điều chưa học', fn() {
+    const bad = [], BADN = /(^|[^A-Za-z])(Cb|Fb|E#|B#)(?![a-z])|##|[A-G]bb/, seen = {}, LS = loadLessons().lessons, ORDER = LS.map(l => l.id), TYPE_AT = {};
+    LS.forEach((l, i) => promptChords(JSON.stringify(l).replace(/\"/g, ' ')).forEach(n => { const ty = parseSymbol(n).type; if (!(ty in TYPE_AT)) TYPE_AT[ty] = i; }));
+    const P = s => { const c = parseSymbol(s); if (!c) bad.push('không đọc được ' + s); return c; };
+    const grab = (q, re) => { const m = q.prompt.match(re); if (!m) bad.push(`${q.key}: prompt lạ ${q.prompt}`); return m ? P(m[1]) : null; };
+    const triadPcs = s => { const k = s.match(/^[A-G][#b]?/)[0], o = { '':[0,4,7], m:[0,3,7], dim:[0,3,6] }[s.slice(k.length)]; return o ? o.map(x => (PC[k] + x) % 12).sort((a, b) => a - b).join() : null; };
+    // ORACLE ĐỘC LẬP (không dùng harmonyOk/modalOk/TYPES của bộ sinh): bộ nốt tính từ bảng quãng viết tay, luật viết lại theo sổ tay.
+    // Mỗi hàm trả về các lựa chọn đúng (phải đúng một, là answer) và tự báo lỗi nếu lựa chọn sai là hợp âm mà khoá học coi là hợp lý.
+    const IV = { '':[0,4,7], m:[0,3,7], dim:[0,3,6], '7':[0,4,7,10], maj7:[0,4,7,11], m7:[0,3,7,10], m7b5:[0,3,6,10], dim7:[0,3,6,9], '9':[0,4,7,10,14], '13':[0,4,7,10,14,21],
+      '13(#11)':[0,4,7,10,14,18,21], '7(b9)':[0,4,7,10,13], '7(#9 b13)':[0,4,10,15,20], '7(b9 b13)':[0,4,10,13,20], '9sus4':[0,5,7,10,14] };
+    const DOMSUF = ['7', '9', '13', '13(#11)', '7(b9)', '7(#9 b13)', '7(b9 b13)', '9sus4'];
+    const N = s => { const m = String(s).match(/^([A-G][#b]?)(.*)$/), iv = m && IV[m[2]]; if (!iv || PC[m[1]] == null) { bad.push('oracle không đọc được ' + s); return { root: -1, suf: '?', pcs: new Set() }; }
+      return { root: PC[m[1]], suf: m[2], pcs: new Set(iv.map(x => (PC[m[1]] + x) % 12)) }; };
+    const md = x => ((x % 12) + 12) % 12, shared = (a, b) => [...a.pcs].filter(p => b.pcs.has(p)).length, isDom = x => DOMSUF.includes(x.suf);
+    const tri = x => [md(x.root + 4), md(x.root + 10)].sort((a, b) => a - b).join();
+    const pick1 = (q, re) => { const m = q.prompt.match(re); if (!m) { bad.push(`${q.key}: prompt lạ ${q.prompt}`); return null; } return N(m[1]); };
+    const scaleOf = q => { const m = q.key.match(/^[a-zA-Z]+:([A-G][#b]?):/); const k = PC[m[1]]; return [0, 2, 4, 5, 7, 9, 11].map(x => (k + x) % 12); };
+    const stack = (sc, d, n) => new Set(Array.from({ length: n }, (_, i) => sc[(d + 2 * i) % 7]));   // chồng quãng 3 trên âm giai
+    const wrongs = q => q.choices.filter(x => x !== q.answer);
+    const right = {
+      tones: q => { const c = q.practice, r = c.root, dom = c.type === 'dom7', p7 = (r + (dom ? 10 : 11)) % 12;
+        return q.choices.filter(x => q.key.includes(':seventh:') ? PC[x] === p7 : x.split(' và ').map(n => PC[n]).join() === [(r + 4) % 12, p7].join()); },
+      motherTo: q => { const M = pick1(q, /, (\S+) là "mẹ"/); if (!M) return []; const A = N(q.answer);
+        wrongs(q).map(N).forEach(w => { if (shared(w, A) >= 2) bad.push(`${q.key}: lựa chọn sai cùng họ thay thế với ${q.answer}`); if (w.root === md(M.root - 1)) bad.push(`${q.key}: ${M.root} là "bạn của mẹ" của lựa chọn sai`); });
+        return q.choices.filter(x => N(x).root === md(M.root - 7)); },
+      motherOf: q => { const t = pick1(q, /kéo về (\S+) \(/); if (!t) return []; const A = N(q.answer);
+        wrongs(q).map(N).forEach(w => { if (isDom(w) && (w.root === md(t.root + 1) || tri(w) === tri(A))) bad.push(`${q.key}: lựa chọn sai là "bạn của mẹ"`); });
+        return q.choices.filter(x => { const c = N(x); return isDom(c) && c.root === md(t.root + 7); }); },
+      degree: q => { const d = +q.prompt.match(/bậc (\d)/)[1] - 1, want = stack(scaleOf(q), d, d === 6 ? 4 : 3);
+        return q.choices.filter(x => { const c = N(x); return c.pcs.size === want.size && [...c.pcs].every(p => want.has(p)) && c.root === scaleOf(q)[d]; }); },
+      subst: q => { const Y = pick1(q, /thay được (\S+) /); if (!Y) return [];
+        if (wrongs(q).some(x => shared(N(x), Y) > 1)) bad.push(`${q.key}: lựa chọn sai chung > 1 nốt`); return q.choices.filter(x => shared(N(x), Y) >= 3); },
+      colourK: q => { const t = pick1(q, /đi về (\S+):/), a = N(q.answer); if (!t) return [];
+        const g = a.root === md(t.root + 1) ? ['13(#11)', '9', '13'] : t.suf.startsWith('m') ? ['7(b9)', '7(#9 b13)', '7(b9 b13)'] : ['9', '13', '13(#11)'];
+        return q.choices.filter(x => g.includes(N(x).suf) && N(x).root === a.root); },
+      rhK: q => { const c = parseSymbol(q.prompt.match(/Tay phải của (.+) là hợp âm gì/)[1]), want = [...new Set(voicing(c).rh.map(n => n % 12))].sort((a, b) => a - b).join();
+        return q.choices.filter(x => [...N(x).pcs].sort((a, b) => a - b).join() === want); },
+      borrow: q => { const sc = new Set(scaleOf(q)); return q.choices.filter(x => [...N(x).pcs].some(p => !sc.has(p))); },
+      friend: q => { const t = pick1(q, /của (\S+) là hợp âm nào/); if (!t) return []; const A = N(q.answer);
+        wrongs(q).map(N).forEach(w => { if (isDom(w) && (w.root === md(t.root + 7) || tri(w) === tri(A))) bad.push(`${q.key}: lựa chọn sai là "mẹ"/chung tritone`); });
+        return q.choices.filter(x => { const c = N(x); return isDom(c) && c.root === md(t.root + 1); }); },
+      dim: q => { const Y = pick1(q, /– \? – (\S+):/); if (!Y) return [];   // dim7 đi lên (đích−1) hay đi xuống (đích+1) đều là "đi qua"; dim7 đối xứng nên so bộ nốt
+        const ok = [md(Y.root - 1), md(Y.root + 1)].map(r => N(nm(r) + 'dim7').pcs);
+        return q.choices.filter(x => { const c = N(x); return c.suf === 'dim7' && ok.some(o => [...o].every(p => c.pcs.has(p))); }); },
+      sister: q => { const m = q.prompt.match(/\? – (\S+) – (\S+)\./); if (!m) return []; const t = N(m[2]), minT = t.suf.startsWith('m');
+        if (N(q.answer).suf !== (minT ? 'm7b5' : 'm7')) bad.push(`${q.key}: "chị" sai loại`);
+        return q.choices.filter(x => { const c = N(x); return ['m7', 'm7b5'].includes(c.suf) && c.root === md(t.root + 2); }); },
+    };
+    // đáp án viết tay cho giọng C, G, F (đề → đáp án)
+    const FIX = { 'motherTo:C': { G7:'C', D7:'G', A7:'Dm', E7:'Am', B7:'Em', C7:'F' }, 'motherTo:G': { D7:'G', A7:'D', E7:'Am', B7:'Em', 'F#7':'Bm', G7:'C' },
+      'motherTo:F': { C7:'F', G7:'C', D7:'Gm', A7:'Dm', E7:'Am', F7:'Bb' }, 'friend:C': { C:'Db7', Dm:'Eb7', Em:'F7', F:'Gb7', G:'Ab7', Am:'Bb7' },
+      'friend:F': { F:'Gb7', Gm:'Ab7', Am:'Bb7', Bb:'B7', C:'Db7', Dm:'Eb7' }, 'dim:C': { Dm7:'C#dim7', Em7:'D#dim7', G7:'F#dim7', Am7:'G#dim7' },
+      'dim:G': { Am7:'G#dim7', Bm7:'A#dim7', D7:'C#dim7', Em7:'D#dim7' }, 'sister:G': { G:'Am7', Am:'Bm7b5', Bm:'C#m7b5', C:'Dm7', D:'Em7', Em:'F#m7b5' },
+      'sister:F': { F:'Gm7', Gm:'Am7b5', Am:'Bm7b5', Bb:'Cm7', C:'Dm7', Dm:'Em7b5' }, 'motherOf:C': { C:'G7', Dm:'A7', Em:'B7', F:'C7', G:'D7', Am:'E7' } };
+    const fixKey = q => { const m = q.prompt.match(/, (\S+) là "mẹ"|của (\S+) là hợp âm nào|– \? – (\S+):|vào (\S+):|kéo về (\S+?)(?:maj7|m7)? \(/); return m && m.slice(1).find(Boolean); };
+    let fixed = 0;
+    eq(Object.keys(right).join(), SKILL_IDS.join());
+    for (const s of SKILLS) for (const minor of [false, true]) for (const kn of KEY12) for (let seed = 1; seed <= 30; seed++) {
+      const rng = seededRng(seed), key = skillKey(kn, minor);
+      for (const up of [s.lesson, 'p4-32']) {
+        const q = skillQuestion(s.id, key, up, rng); if (!q) { if (!minor) bad.push(`${s.id} ${kn}: không sinh được`); continue; }
+        seen[s.id] = (seen[s.id] || 0) + 1;
+        if (q.choices.length !== 4 || new Set(q.choices).size !== 4 || !q.choices.includes(q.answer)) bad.push(`${q.key}: lựa chọn ${q.choices}`);
+        if (!q.why || !q.why.trim()) bad.push(`${q.key}: thiếu why`);
+        [q.prompt, q.why, ...q.choices].forEach(x => { if (BADN.test(x)) bad.push(`${q.key}: tên sai ${x}`); if (/7 trơn|\(\s*[A-G][#b]?\s+trên\s+[A-G]/.test(x)) bad.push(`${q.key}: ${x}`); });
+        if (!q.textChoices && !q.hand) q.choices.forEach(P);
+        const late = lateTerms([q.prompt, q.why, ...q.choices].join(' '), up); if (late.length) bad.push(`${q.key} (${up}): chưa học ${late}`);
+        const ok1 = right[s.id](q); if (ok1.join() !== q.answer) bad.push(`${q.key}: đúng = [${ok1}], đáp án ${q.answer}`);
+        const fx = !minor && FIX[`${s.id}:${kn}`], fk = fx && fixKey(q); if (fx && fk in fx) { fixed++; if (fx[fk] !== q.answer) bad.push(`${q.key}: đáp án ${q.answer}, cần ${fx[fk]}`); }
+        // loại hợp âm trong đề và lựa chọn phải đã xuất hiện trong bài ≤ upTo (không hỏi 7sus4(b9) trước khi có trong bài)
+        [...promptChords(q.prompt), ...(q.textChoices || q.hand ? [] : q.choices)].forEach(n => { const ty = parseSymbol(n).type, at = TYPE_AT[ty];
+          if (!(at <= ORDER.indexOf(up))) bad.push(`${q.key} (${up}): loại ${ty} (${n}) chưa có trong bài`); });
+        if (q.practice && !theoryPcs(q.practice).size) bad.push(`${q.key}: practice`);
+        if (q.prog) q.prog.forEach(P);
+      } }
+    SKILLS.forEach(s => ok(seen[s.id] > 100, `${s.id}: chỉ sinh ${seen[s.id]} câu`)); ok(fixed > 300, 'ít câu khớp bảng đáp án viết tay: ' + fixed);
+    ok(!skillQuestion('friend', skillKey('C'), 'p3-21', Math.random) && skillQuestion('friend', skillKey('C'), 'p3-22', Math.random), 'dạng chưa học vẫn sinh');
+    if (bad.length) throw [...new Set(bad)].slice(0, 25).join('; '); } },
+{ fast:1, name:'Kho câu hỏi A2: tên hợp âm đúng chữ cái ở các giọng khác C ("mẹ" của C#m là G#7, Bb7 về Am, D#dim7 vào Em7, Edim7 vào Fm7, mượn ở giọng F)', fn() {
+    const all = (kind, kn, up = 'p4-32', minor = false) => { const out = new Set(); for (let s = 1; s <= 150; s++) {
+      const rng = seededRng(s), q = skillQuestion(kind, skillKey(kn, minor), up, rng); if (q) out.add(q.prompt + ' = ' + q.answer); } return [...out]; };
+    const has = (kind, kn, frag) => ok(all(kind, kn).some(x => x.includes(frag)), `${kind} ${kn}: không có "${frag}" — ${all(kind, kn).slice(0, 4).join(' | ')}`);
+    has('motherOf', 'A', 'kéo về C#m ("mẹ" của C#m)? = G#7'); has('motherOf', 'C', 'kéo về Am ("mẹ" của Am)? = E7'); has('motherOf', 'Eb', 'kéo về Cm ("mẹ" của Cm)? = G7');
+    has('friend', 'C', '"Bạn của mẹ" của Am là hợp âm nào? = Bb7'); has('friend', 'F', 'của Dm là hợp âm nào? = Eb7');
+    has('dim', 'G', 'D7 – ? – Em7: chỗ ? là hợp âm giảm đi qua nào? = D#dim7'); has('dim', 'Eb', 'Ebmaj7 – ? – Fm7: chỗ ? là hợp âm giảm đi qua nào? = Edim7');
+    has('dim', 'Bb', 'Ebmaj7 – ? – F7: chỗ ? là hợp âm giảm đi qua nào? = Edim7');
+    ['Bbm7', 'Abmaj7', 'Dbmaj7', 'Eb7', 'Gm7b5'].forEach(n => has('borrow', 'F', '= ' + n));
+    ok(!all('borrow', 'Eb').some(x => /Cbmaj7|= Bmaj7/.test(x)), 'giọng Eb không được có Cbmaj7/Bmaj7');
+    has('sister', 'D', 'II–V vào Bm: ? – F#7(b9) – Bm. Chỗ ? là "chị" nào? = C#m7b5'); has('sister', 'Bb', 'II–V vào Eb: ? – Bb7 – Eb. Chỗ ? là "chị" nào? = Fm7');
+    has('degree', 'D', 'bậc 7 là hợp âm gì? = C#m7b5'); has('degree', 'Bb', 'bậc 4 là hợp âm gì? = Eb');
+    has('rhK', 'C', 'Tay phải của G13(#11) là hợp âm gì? = A'); has('tones', 'Eb', 'Nốt 7 của Bb7 là nốt nào? = Ab');
+    // giọng thứ: "mẹ" của đích thứ vẫn là hợp âm 7
+    ok(all('motherTo', 'A', 'p4-32', true).some(x => x.includes('E7 là "mẹ" của hợp âm nào? = Am')), all('motherTo', 'A', 'p4-32', true).join(' | '));
+    eq(lessonTag('p3-09'), 'P3 · bài 9'); eq(lessonTag('p4-24'), 'P4 · bài 24'); } },
+{ name:'Kho câu hỏi A3: mỗi bài (57 bài) có kho ≥ 12 câu khác nhau, ~2/3 câu tự sinh ở giọng C; quiz rút 5 câu có câu bấm của mục bài tập, tối đa 2 (P3) / 1 (P4) câu tự sinh, có dạng của bài, không hai câu cùng ý', fn() {
+    const ls = loadLessons().lessons.filter(l => l.part === 3 || l.part === 4), bad = []; let c = 0, all = 0;
+    eq(ls.length, 57);
+    for (const l of ls) for (const seed of [1, 7, 42]) {
+      const rng = (v => () => (v = (v * 16807) % 2147483647) / 2147483647)(seed), bank = makeQuiz(l, rng, { bank: true }), keys = new Set(bank.map(x => x.key));
+      if (keys.size < 12 || keys.size !== bank.length) bad.push(`${l.id}: kho ${keys.size}/${bank.length}`);
+      bank.filter(x => SKILL_IDS.includes(x.kind)).forEach(x => { all++; if (x.keyName === 'C') c++; if (SKILLS.find(s => s.id === x.kind).lesson > l.id) bad.push(`${l.id}: dạng ${x.kind} chưa học`); });
+      const q = makeQuiz(l, rng);
+      if (q.length !== 5 || new Set(q.map(x => x.key)).size !== 5) bad.push(`${l.id}: ${q.length} câu`);
+      const pl = q.filter(x => x.kind === 'play'); if (pl.length !== 1 || !l.items.includes(pl[0].item)) bad.push(`${l.id}: câu bấm không phải mục bài tập`);
+      if (q[q.length - 1].kind !== 'play') bad.push(`${l.id}: câu bấm không ở cuối`);
+      if (bank.some(x => x.kind === 'slot') && !q.some(x => x.kind === 'slot')) bad.push(`${l.id}: thiếu câu "chỗ ?"`);
+      q.filter(x => x.choices).forEach(x => { if (x.choices.length !== 4 || !x.choices.includes(x.answer)) bad.push(`${x.key}: lựa chọn`); });
+      const sk = q.filter(x => SKILL_IDS.includes(x.kind)), own = SKILLS.filter(x => x.lesson === l.id).map(x => x.id);
+      if (sk.length > (l.part === 4 ? 1 : 2)) bad.push(`${l.id}: ${sk.length} câu tự sinh`);
+      if (own.length && !sk.some(x => own.includes(x.kind))) bad.push(`${l.id}: thiếu câu dạng của bài (${own})`);
+      const np = q.filter(x => x.kind !== 'play');
+      np.forEach((x, i) => np.slice(i + 1).forEach(y => { if (sameIdea(x, y)) bad.push(`${l.id}: hai câu cùng ý — ${x.prompt} / ${y.prompt}`); }));
+      bank.filter(x => SKILL_IDS.includes(x.kind)).forEach(x => { if (bank.some(y => y !== x && !SKILL_IDS.includes(y.kind) && sameIdea(x, y))) bad.push(`${l.id}: kho có câu tự sinh cùng ý ${x.prompt}`); }); }
+    ok(c / all > 0.55 && c / all < 0.8, `tỉ lệ giọng C ${c}/${all}`);
+    if (bad.length) throw [...new Set(bad)].slice(0, 20).join('; '); } },
+{ fast:1, name:'Kho câu hỏi A4: lần làm sau tránh các câu của lần trước (khi kho còn đủ); tiến độ nhớ recent, bỏ qua dữ liệu hỏng', fn() {
+    const ls = loadLessons().lessons.filter(l => l.part === 3 || l.part === 4), bad = [];
+    for (const l of ls) for (const seed of [3, 11]) {
+      const rng = (v => () => (v = (v * 16807) % 2147483647) / 2147483647)(seed), q1 = makeQuiz(l, rng), k1 = q1.map(x => x.key);
+      const bank = makeQuiz(l, rng, { bank: true }), q2 = makeQuiz(l, rng, { recent: k1 });
+      q2.filter(x => k1.includes(x.key)).forEach(x => {   // chỉ được lặp khi mọi câu cùng dạng bắt buộc (bấm, "chỗ ?") đều đã gặp
+        if (!['play', 'slot'].includes(x.kind) || bank.filter(b => b.kind === x.kind).some(b => !k1.includes(b.key))) bad.push(`${l.id}: lặp ${x.key}`); }); }
+    const mem = d => ({ getItem: () => d, setItem() {} });
+    eq(JSON.stringify(loadProgress(mem('{"recent":{"p3-01":["a",3,"b"],"p3-02":"x"}}')).recent), '{"p3-01":["a","b"]}');
+    eq(JSON.stringify(loadProgress(mem('{"done":{}}')).recent), '{}');
+    const Q = ks => ks.map(key => ({ key }));   // recent nhớ hai lần gần nhất, tối đa 10 key, lần mới trước
+    eq(nextRecent(undefined, Q(['a', 'b'])).join(), 'a,b'); eq(nextRecent(['a', 'b', 'c', 'd', 'e'], Q(['f', 'g', 'h', 'i', 'j'])).join(), 'f,g,h,i,j,a,b,c,d,e');
+    eq(nextRecent(['x', 'y', 'z', 'u', 'v', 'a', 'b'], Q(['f', 'g', 'h', 'i', 'j'])).length, 10);
+    eq(wrongKey({ key: 'p3-09:motherOf:C:of:G', skill: 'motherOf', kind: 'motherOf' }), 'skill:motherOf'); eq(wrongKey({ key: 'p3-09:before:E7' }), 'p3-09:before:E7');
+    if (bad.length) throw bad.slice(0, 20).join('; '); } },
   { name:'Fix cuối #7: test nhanh lúc mở app đạt hết dù mức tay đã lưu là 1, rồi trả lại mức 1', async fn() {
     const keep = settings.level; settings.level = 1;
     try {
@@ -2308,7 +2691,10 @@ if (typeof document !== 'undefined') {
     const all = loadLessons().lessons, lesson = all.find(l => l.id === id);
     if (!lesson) return learn();
     clearTarget(); let run = lessonRun;
-    const quizQs = makeQuiz(lesson, Math.random);
+    // kho câu hỏi: tránh các câu vừa gặp ở lần trước (nhớ trong tiến độ; ?test thì không đọc/ghi)
+    const quizQs = makeQuiz(lesson, Math.random, { recent: TEST_MODE ? [] : progress.recent[id] || [] });
+    let noted = false;   // ghi recent khi thật sự tới câu hỏi đầu tiên (mở bài rồi thoát không tính)
+    const noteRecent = () => { if (noted || TEST_MODE) return; noted = true; progress.recent[id] = nextRecent(progress.recent[id], quizQs); persist(); };
     const steps = [
       ...lesson.teach.map((t, k) => ({ k:'card', t, head:`Giảng ${k + 1}/${lesson.teach.length}` })),
       ...(lesson.remember && lesson.remember.length ? [{ k:'rem', head:'Ghi nhớ' }] : []),
@@ -2343,7 +2729,7 @@ if (typeof document !== 'undefined') {
         const nl = $('main').querySelector('[data-next-lesson]'); if (nl) nl.onclick = () => openLesson(nl.dataset.nextLesson);
         return;
       }
-      const st = steps[i]; skip = advance;
+      const st = steps[i]; skip = advance; if (st.k === 'q') noteRecent();
       if (st.k === 'card') {
         resetPanel(); const t = st.t;
         const btn = (attr, label) => `<button class="b" ${attr}>▶ ${esc(label)}</button>`;
@@ -2391,13 +2777,13 @@ if (typeof document !== 'undefined') {
           else {
             b.classList.add('wrong'); b.disabled = true;   // bấm lại nút sai không đếm thêm lỗi
             wrongs.set(i, [...(wrongs.get(i) || []), b.dataset.n]);
-            progress.wrong[q.key] = (Number(progress.wrong[q.key]) || 0) + 1; persist();
+            progress.wrong[wrongKey(q)] = (Number(progress.wrong[wrongKey(q)]) || 0) + 1; persist();
           }
         });
       } else {
         const q = st.q; resetPanel();
         frame(`<h3>${renderTeachText(q.prompt)}</h3><p class="why">${renderTeachText(q.why || '')}</p><p>Bấm trên đàn hoặc chạm phím rồi nhấn Kiểm tra.</p>${bk()}<button class="b" data-skip>Bỏ qua</button>`);
-        skip = () => { if (!resolved.has(i)) { resolved.add(i); progress.wrong[q.key] = (Number(progress.wrong[q.key]) || 0) + 1; persist(); } advance(); };
+        skip = () => { if (!resolved.has(i)) { resolved.add(i); progress.wrong[wrongKey(q)] = (Number(progress.wrong[wrongKey(q)]) || 0) + 1; persist(); } advance(); };
         wire();
         const r = lessonRun, at = i; setTarget(q.chord, () => { if (r === lessonRun && i === at) { resolved.add(at); advance(); } });
       }
@@ -2406,8 +2792,60 @@ if (typeof document !== 'undefined') {
   }
 
   // ---- Tab Đố ----
+  // Menu dạng câu (thiết kế mục 10.4): mỗi dạng mở khi đã học xong bài dạy nó; "Trộn" lấy các dạng đã mở;
+  // "Vòng hợp âm" là dạng cũ (luôn mở). Giọng: Chỉ C / Nhiều giọng (C G F D Bb A Eb). Điểm đúng/sai đếm trong phiên.
   let prog = ['C','Am','F','G'];
+  const quizState = { mode: null, keys: 'C', ok: 0, bad: 0, q: null };
+  const openSkills = () => SKILLS.filter(s => progress.done[s.lesson]);
   function quiz() {
+    const open = openSkills(), st = quizState;
+    if (!st.mode || (st.mode === 'mix' && !open.length) || (SKILL_IDS.includes(st.mode) && !open.some(s => s.id === st.mode))) st.mode = open.length ? 'mix' : 'ring';
+    const opt = (v, label, on) => `<option value="${v}"${on ? '' : ' disabled'}${st.mode === v ? ' selected' : ''}>${esc(label)}</option>`;
+    const ring = st.mode === 'ring';
+    $('main').innerHTML = `<div class="card qbar"><label class="qlab">Dạng câu <select id="qmode">${opt('mix', open.length ? 'Trộn (các dạng đã học)' : '🔒 Trộn — học xong một bài để mở', open.length > 0)}` +
+      SKILLS.map(s => opt(s.id, progress.done[s.lesson] ? `${s.label} · ${lessonTag(s.lesson)}` : `🔒 ${s.label} — học ở ${lessonTag(s.lesson)}`, !!progress.done[s.lesson])).join('') +
+      opt('ring', `Vòng hợp âm (${prog.join(' ')})`, true) + `</select></label>
+      <div class="row"><button class="b seg${st.keys === 'C' ? ' act' : ''}" data-keys="C"${ring ? ' disabled' : ''}>Chỉ C</button><button class="b seg${st.keys === 'many' ? ' act' : ''}" data-keys="many"${ring ? ' disabled' : ''}>Nhiều giọng</button>
+      <span id="qscore" class="mut">Đúng ${st.ok} · Sai ${st.bad}</span></div>
+      ${open.length ? '' : `<p class="mut" id="qhint">Học xong bài ở mục Học để mở thêm dạng câu: dạng đầu tiên (${esc(SKILLS[0].label)}) mở sau ${lessonTag(SKILLS[0].lesson)}.</p>`}</div><div id="qbody"></div>`;
+    $('qmode').onchange = e => { st.mode = e.target.value; clearTarget(); quiz(); };
+    $('main').querySelectorAll('[data-keys]').forEach(b => b.onclick = () => { st.keys = b.dataset.keys; clearTarget(); quiz(); });
+    (ring ? ringQuestion : skillRound)();
+  }
+  // một câu sai/đúng chỉ tính một lần: đúng ngay lần đầu → Đúng; có chọn sai → Sai
+  const score = (wrongFirst) => { if (wrongFirst) quizState.bad++; else quizState.ok++; const e = $('qscore'); if (e) e.textContent = `Đúng ${quizState.ok} · Sai ${quizState.bad}`; };
+  function skillRound() {
+    const open = openSkills(), st = quizState, order = loadLessons().lessons.map(l => l.id).filter(id => progress.done[id]);
+    const upTo = order[order.length - 1] || null;   // đã học tới bài này: câu chỉ dùng điều đã học
+    let q = null;
+    for (let n = 0; n < 30 && !q; n++) {
+      const s = st.mode === 'mix' ? open[Math.floor(Math.random() * open.length)] : SKILLS.find(x => x.id === st.mode);
+      const kn = st.keys === 'C' ? 'C' : SKILL_KEYS[Math.floor(Math.random() * SKILL_KEYS.length)];
+      q = skillQuestion(s.id, skillKey(kn), upTo, Math.random);
+      if (q && st.q && q.key === st.q.key && n < 29) q = null;   // không lặp ngay câu vừa hỏi
+    }
+    st.q = q; if (!q) { $('qbody').innerHTML = '<div class="card"><p class="mut">Chưa sinh được câu hỏi, chọn dạng khác.</p></div>'; return; }
+    const s = SKILLS.find(x => x.id === q.kind);
+    $('qbody').innerHTML = `<div class="card"><div class="mut">${esc(s.label.replace(/ X$/, ''))} · giọng ${esc(q.keyName)} · ${lessonTag(s.lesson)}</div>
+      <h3>${renderTeachText(q.prompt)}</h3><div class="choices">${q.choices.map(c => `<button class="b" data-n="${esc(c)}">${esc(c)}</button>`).join('')}</div><div id="fb"></div></div>`;
+    let missed = false;
+    $('qbody').querySelectorAll('.choices [data-n]').forEach(b => b.onclick = () => {
+      if (b.disabled) return;
+      if (b.dataset.n !== q.answer) { b.classList.add('wrong'); b.disabled = true; if (!missed) { missed = true; score(true); }
+        $('fb').innerHTML = '<p><span class="bad">Chưa đúng.</span> Thử lựa chọn khác.</p>'; return; }
+      b.classList.add('right'); $('qbody').querySelectorAll('.choices [data-n]').forEach(x => x.disabled = true); if (!missed) score(false);
+      const pc = q.practice;
+      $('fb').innerHTML = `<p class="why"><span class="ok">✓ ${esc(q.answer)}</span> — ${renderTeachText(q.why)}</p>` +
+        (pc ? `<p class="mut">Giờ bấm thử ${esc(pc.name)} trên đàn (đúng thì sang câu mới).</p>` : '') +
+        `<div class="row">${q.prog ? '<button class="b" data-play-prog>▶ Nghe cả câu</button>' : ''}<button class="b pri" data-qnext>Câu tiếp →</button></div>`;
+      const run = lessonRun;
+      $('fb').querySelector('[data-qnext]').onclick = () => { clearTarget(); quiz(); };
+      const pb = $('fb').querySelector('[data-play-prog]');
+      if (pb) pb.onclick = () => { if (run === lessonRun) playSeq(q.prog.map(n => [parseSymbol(n), 2, null]), () => { if (run === lessonRun && pc) setTarget(pc, quiz); }); };
+      if (pc) setTarget(pc, quiz);
+    });
+  }
+  function ringQuestion() {
     const cs = prog.map(parseChord).filter(Boolean);
     const i = 1 + Math.floor(Math.random() * (cs.length - 1));
     const tgt = cs[i], right = suggest(tgt)[0];
@@ -2415,18 +2853,21 @@ if (typeof document !== 'undefined') {
     const pool = [right.c, wrongTension, chord(tgt.root + 9, 'dom7'), chord(tgt.root + 5, 'maj')];
     const opts = [...new Map(pool.map(c => [c.name, c])).values()].sort(() => Math.random() - 0.5);
     const line = cs.map((c, k) => k === i ? `<span class="q">?</span> | ${c.name}` : c.name).join(' | ');
-    $('main').innerHTML = `<div class="card"><div class="mut">Vòng: ${prog.join(' ')} · ô "?" là 2 phách cuối trước ${tgt.name}</div>
+    quizState.q = { kind: 'ring', answer: right.c.name, choices: opts.map(c => c.name) };
+    $('qbody').innerHTML = `<div class="card"><div class="mut">Vòng: ${prog.join(' ')} · ô "?" là 2 phách cuối trước ${tgt.name}</div>
       <div class="prog">${line}</div><h3>Hợp âm gì kéo về ${tgt.name}?</h3>
       <div class="choices">${opts.map(c => `<button class="b" data-n="${c.name}">${c.name}</button>`).join('')}</div>
       <p id="fb"></p></div>`;
-    $('main').querySelectorAll('[data-n]').forEach(b => b.onclick = () => {
+    let missed = false;
+    $('qbody').querySelectorAll('[data-n]').forEach(b => b.onclick = () => {
+      if (b.disabled) return;
       if (b.dataset.n === right.c.name) {
-        b.classList.add('right');
-        $('main').querySelectorAll('[data-n]').forEach(x => x.disabled = true);
+        b.classList.add('right'); if (!missed) score(false);
+        $('qbody').querySelectorAll('[data-n]').forEach(x => x.disabled = true);
         $('fb').innerHTML = `<span class="ok">✓ ${right.c.name}</span> — ${right.why}<br><span class="mut">Giờ bấm thử thế tay bên dưới.</span>`;
         setTarget(inContext(right.c, cs[i - 1]), quiz);
       } else {
-        b.classList.add('wrong'); b.disabled = true;
+        b.classList.add('wrong'); b.disabled = true; if (!missed) { missed = true; score(true); }
         $('fb').innerHTML = `<span class="bad">Chưa đúng.</span> Gợi ý: bass cao hơn ${tgt.name} một quãng 5 (từ ${nm(tgt.root)} đếm lên 5 tên nốt, nốt thứ năm là bass), và ${tgt.name} là hợp âm ${tgt.type === 'min' ? 'thứ' : 'trưởng'}.`;
       }
     });
@@ -2726,6 +3167,49 @@ if (typeof document !== 'undefined') {
           ok(b.classList.contains('wrong'), `chọn sai ${b.textContent} mà không tô đỏ`);
         }
         ok(right, 'chọn đúng mà không tô xanh'); } },
+    { name:'Đố B1: menu dạng câu — dạng chưa học bị khoá, ghi "học ở P3 · bài N"; chưa học gì thì chỉ mở Vòng hợp âm và có lời nhắc', fn() {
+        const keep = JSON.stringify(progress), keepQ = { ...quizState };
+        try {
+          progress.done = {}; quizState.mode = null; TABS.quiz();
+          const opts = () => [...$('qmode').options], o = v => opts().find(x => x.value === v);
+          eq(opts().length, SKILLS.length + 2); eq($('qmode').value, 'ring'); ok(!o('ring').disabled, 'Vòng hợp âm bị khoá');
+          ok(o('mix').disabled && SKILLS.every(s => o(s.id).disabled), 'dạng chưa học không bị khoá');
+          ok(o('friend').textContent.includes('học ở P3 · bài 22') && o('motherOf').textContent.includes('học ở P3 · bài 9'), o('friend').textContent);
+          ok($('qhint'), 'thiếu lời nhắc học bài'); ok($('main').querySelector('.choices [data-n]'), 'Vòng hợp âm không có câu hỏi');
+          ok([...$('main').querySelectorAll('[data-keys]')].every(b => b.disabled), 'Vòng hợp âm không dùng lựa chọn giọng');
+          progress.done = { 'p3-01': true, 'p3-02': true }; quizState.mode = null; TABS.quiz();
+          eq($('qmode').value, 'mix'); ok(!$('qhint'), 'đã mở dạng mà vẫn nhắc');
+          ok(!o('tones').disabled && !o('motherTo').disabled && o('motherOf').disabled && o('sister').disabled, opts().map(x => x.value + (x.disabled ? '🔒' : '')).join());
+          ok(o('motherTo').textContent.includes('P3 · bài 2') && !o('motherTo').textContent.includes('🔒'), o('motherTo').textContent);
+          for (let n = 0; n < 25; n++) { TABS.quiz(); ok(['tones', 'motherTo'].includes(quizState.q.kind), 'Trộn lấy dạng chưa mở: ' + quizState.q.kind); }
+          quizState.mode = 'friend'; TABS.quiz(); eq($('qmode').value, 'mix');   // dạng bị khoá không chọn được
+        } finally { Object.assign(progress, JSON.parse(keep)); Object.assign(quizState, keepQ); clearTarget(); TABS.learn(); } } },
+    { name:'Đố B2: một vòng câu hỏi — chọn dạng, đổi giọng, sai rồi đúng tính Sai 1, có giải thích, bấm thử hợp âm đáp án, câu tiếp; không tràn ngang khi mở hết', async fn() {
+        const keep = JSON.stringify(progress), keepQ = { ...quizState }, wait = ms => new Promise(r => setTimeout(r, ms));
+        try {
+          progress.done = Object.fromEntries(loadLessons().lessons.map(l => [l.id, true])); Object.assign(quizState, { mode: null, keys: 'C', ok: 0, bad: 0, q: null });
+          TABS.quiz(); const sel = $('qmode'); sel.value = 'motherOf'; sel.onchange({ target: sel });
+          let q = quizState.q; eq(q.kind, 'motherOf'); eq(q.keyName, 'C');
+          const btn = n => [...$('main').querySelectorAll('.choices [data-n]')].find(b => b.dataset.n === n);
+          eq($('main').querySelectorAll('.choices [data-n]').length, 4);
+          const w = q.choices.find(c => c !== q.answer); btn(w).click(); btn(w).click();
+          ok(btn(w).classList.contains('wrong'), 'chọn sai không tô đỏ'); eq($('qscore').textContent, 'Đúng 0 · Sai 1');
+          btn(q.answer).click(); ok(btn(q.answer).classList.contains('right'), 'chọn đúng không tô xanh'); eq($('qscore').textContent, 'Đúng 0 · Sai 1');
+          ok($('fb').querySelector('.why') && $('fb').textContent.includes(q.why.slice(0, 15)), 'thiếu giải thích');
+          ok(target && target.name === q.answer, 'chưa đặt hợp âm đáp án lên bảng bấm thử');
+          click('[data-qnext]'); ok(quizState.q !== q, 'không sang câu mới'); q = quizState.q;
+          btn(q.answer).click(); eq($('qscore').textContent, 'Đúng 1 · Sai 1');
+          // bấm thử đúng → tự sang câu mới
+          const v = voicing(target); judge([...v.lh, ...v.rh]); await wait(1100); ok(quizState.q !== q, 'bấm đúng mà không sang câu mới');
+          // nhiều giọng: có lúc ra giọng khác C
+          click('[data-keys="many"]'); ok($('main').querySelector('[data-keys="many"]').classList.contains('act'), 'nút Nhiều giọng không sáng');
+          const ks = new Set(); for (let n = 0; n < 30; n++) { TABS.quiz(); ks.add(quizState.q.keyName); } ok(ks.size >= 3, [...ks].join());
+          // dạng có tiến hành: có nút nghe cả câu; dạng nào cũng vẽ được và không tràn ngang
+          for (const s of SKILLS) { quizState.mode = s.id; TABS.quiz(); q = quizState.q; ok(q && q.kind === s.id, s.id + ': không có câu');
+            btn(q.answer).click(); if (q.prog) ok($('fb').querySelector('[data-play-prog]'), s.id + ': thiếu nút nghe');
+            ok($('main').scrollWidth <= $('main').clientWidth + 1 && document.documentElement.scrollWidth <= window.innerWidth + 1, `${s.id}: tràn ngang ${$('main').scrollWidth}/${$('main').clientWidth}`); }
+          stopPlay();
+        } finally { Object.assign(progress, JSON.parse(keep)); Object.assign(quizState, keepQ); clearTarget(); TABS.learn(); } } },
     { name:'Lỗi #21: Tái hoà âm có nút "Chọn" và đủ 4 nút nghe', fn() {
         TABS.reharm(); click('[data-p="1-0"]');
         ['playNew','playBase','playOld','playEnd'].forEach(id => ok($(id), 'thiếu nút ' + id)); } },
