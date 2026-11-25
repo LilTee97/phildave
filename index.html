@@ -934,7 +934,12 @@ function grade(notes, c) {
   const okp = new Set([...theoryPcs(c), ...(nine != null ? [nine] : [])]), extra = [...got].filter(p => !need.has(p) && !okp.has(p)).map(nm);   // nốt thuộc hợp âm (kể cả nốt 7 bị bỏ ở mức tay thấp) không bị coi là thừa
   const ok = bassOk && !missing.length && !extra.length;
   let msg = ok ? '✓ Đúng rồi!' : [
-    bassOk ? '' : `Bass phải là ${c.bass != null ? (c.bassName ?? nm(want)) : (c.rootName ?? nm(want))}`,
+    bassOk ? '' : (() => {
+      const wn = c.bass != null ? (c.bassName ?? nm(want)) : (c.rootName ?? nm(want)), low = spell(c, Math.min(...notes) % 12);
+      if (!missing.length && !extra.length && c.bass == null)
+        return `Đủ nốt của ${c.name} rồi, nhưng nốt thấp nhất là ${low} nên nghe thành ${c.name}/${low} (thế đảo, bass khác). Thêm ${wn} ở dưới cùng (tay trái) để đúng ${c.name}`;
+      return `Nốt thấp nhất (bass) phải là ${wn}`;
+    })(),
     missing.length ? `thiếu ${missing.join(' ')}` : '',
     extra.length ? `thừa ${extra.join(' ')}` : '',
   ].filter(Boolean).join(' · ');
@@ -1539,6 +1544,10 @@ const TESTS = [
       ok(grade([40,50,56,59,65], chord(4,'domb9')).ok, 'E7(b9) bấm đúng mà chấm sai');
       ok(!grade([50,56,59,65], chord(4,'domb9')).ok, 'sai bass mà chấm đúng');
       ok(grade([36,52,55,60], chord(0,'maj')).ok, 'C thế đảo mà chấm sai'); } },
+  { fast:1, name:'Chấm: đủ nốt nhưng bass sai thì nói rõ là thế đảo và cách sửa (A7: C# E G A)', fn() {
+      const r = grade([61,64,67,69], chord(9,'dom7'));
+      ok(!r.ok && r.msg.includes('Đủ nốt của A7') && r.msg.includes('A7/C#') && r.msg.includes('Thêm A'), r.msg);
+      const r2 = grade([62,64,67], chord(9,'dom7')); ok(!r2.ok && r2.msg.includes('Nốt thấp nhất (bass) phải là A'), r2.msg); } },
   { fast:1, name:'Fix cuối #3: mức 1 bỏ nốt 7 khỏi thế hiển thị nhưng chơi thêm nốt 7 (hay nốt hợp âm) vẫn đúng; nốt ngoài hợp âm vẫn thừa', fn() {
       const keep = settings.level; settings.level = 1;
       try { const g7 = chord(7,'dom7');
