@@ -67,6 +67,21 @@
   .choices button.right, .choices button.wrong { opacity:1; }
   .choices button { overflow-wrap:anywhere; }
   #qscore { margin-left:auto; }
+  .confirm { background:#2b2a26; border-radius:8px; padding:6px 8px; } .confirm span { flex:1 1 100%; }
+  .tbar { flex:1; height:12px; background:#111318; border-radius:6px; overflow:hidden; }
+  .tbar i { display:block; height:100%; background:var(--ok); }
+  .tbar i.low { background:var(--bad); }
+  .tsec { min-width:2ch; text-align:right; font-size:20px; font-variant-numeric:tabular-nums; }
+  .bigscore { font-size:44px; font-weight:800; line-height:1.1; }
+  .wq { border-top:1px solid #2f3440; padding:8px 0; } .wq p { margin:2px 0; }
+  .hchart { height:110px; padding-left:22px; margin:8px 0 22px; }
+  .hplot { position:relative; display:flex; align-items:flex-end; gap:4px; height:100%; }
+  .hcol { position:relative; flex:1; min-width:0; height:100%; display:flex; align-items:flex-end; justify-content:center; }
+  .hbar { width:100%; max-width:30px; background:var(--rh); border-radius:3px 3px 0 0; }
+  .hbar.pass { background:var(--ok); }
+  .hcol > span { position:absolute; bottom:-16px; font-size:11px; color:var(--mut); }
+  .hline { position:absolute; left:-4px; right:0; border-top:1px dashed var(--mut); pointer-events:none; }
+  .hline span { position:absolute; left:-18px; top:-8px; font-size:11px; color:var(--mut); }
 </style>
 </head>
 <body>
@@ -725,6 +740,63 @@ async function loadPiano(fetchFn = fetch, timeoutMs = 3000) {
   } catch (e) { return false; }
 }
 
+// ---------- Đố vượt màn: chấm điểm, so sánh, lịch sử (thiết kế mục 11) ----------
+const ROUND_LEN = 30, PASS_MARK = 27, HISTORY_CAP = 50;
+const TIMER_LEVELS = [{ id: 'slow', label: 'Thong thả', sec: 20 }, { id: 'mid', label: 'Vừa', sec: 12 }, { id: 'fast', label: 'Nhanh', sec: 7 }];
+// results = [{ ok, ms }] → điểm, tổng và trung bình thời gian, qua màn hay chưa
+function gradeRound(results, pass = PASS_MARK) {
+  const score = results.filter(r => r.ok).length, totalMs = results.reduce((a, r) => a + (Number(r.ms) || 0), 0);
+  return { score, total: results.length, totalMs, avgMs: results.length ? totalMs / results.length : 0, passed: score >= pass };
+}
+// > 0 nếu a tốt hơn b: điểm cao hơn thắng, bằng điểm thì tổng thời gian ít hơn thắng
+const cmpAttempt = (a, b) => a.score !== b.score ? Math.sign(a.score - b.score) : a.ms !== b.ms ? Math.sign(b.ms - a.ms) : 0;
+const sameSel = (a, s) => a.kind === s.kind && a.keys === s.keys && a.timer === s.timer;
+// Các lần làm cùng dạng + giọng + mốc giờ, theo thứ tự thời gian (history = { dạng: [lần làm] })
+const selectionHistory = (history, sel) => ((history && history[sel.kind]) || []).filter(a => sameSel(a, sel));
+// So lần làm att với lịch sử (chưa chứa att): lần trước, kỷ lục trước đó, hơn/kém lần trước, có phải kỷ lục mới
+function compareAttempt(history, att) {
+  const h = selectionHistory(history, att), prev = h.length ? h[h.length - 1] : null;
+  const best = h.reduce((b, a) => !b || cmpAttempt(a, b) > 0 ? a : b, null);
+  return { prev, best, vsPrev: prev ? cmpAttempt(att, prev) : null, isRecord: !best || cmpAttempt(att, best) > 0, count: h.length };
+}
+// Thêm một lần làm; mỗi dạng giữ tối đa cap lần mới nhất. Trả về lịch sử mới, không sửa bản cũ.
+function addAttempt(history, att, cap = HISTORY_CAP) {
+  const out = { ...(history || {}) }; out[att.kind] = capCombos([...(out[att.kind] || []), att], cap); return out;
+}
+// Mỗi tổ hợp dạng + giọng + mốc giờ giữ tối đa cap lần mới nhất (kỷ lục của tổ hợp ít chơi không bị đẩy ra bởi tổ hợp khác)
+function capCombos(list, cap) {
+  const count = {}, out = []; for (let i = list.length - 1; i >= 0; i--) { const a = list[i], k = `${a.keys}|${a.timer}`; count[k] = (count[k] || 0) + 1; if (count[k] <= cap) out.push(a); }
+  return out.reverse();
+}
+function sanitizeHistory(raw) {
+  const out = {}; if (!isObj(raw)) return out;
+  const valid = a => isObj(a) && typeof a.kind === 'string' && (a.keys === 'C' || a.keys === 'many') && TIMER_LEVELS.some(t => t.id === a.timer)
+    && Number.isInteger(a.score) && a.score >= 0 && a.score <= ROUND_LEN && Number.isFinite(a.ms) && a.ms >= 0 && Number.isFinite(a.at);
+  for (const [k, v] of Object.entries(raw)) if (Array.isArray(v) && !['__proto__', 'constructor', 'prototype'].includes(k)) { const l = capCombos(v.filter(valid).map(a => ({ kind: a.kind, keys: a.keys, timer: a.timer, score: a.score, ms: a.ms, at: a.at })), HISTORY_CAP); if (l.length) out[k] = l; }
+  return out;
+}
+// Một màn n câu: dạng lấy từ kinds (mỗi câu một dạng ngẫu nhiên), tránh trùng key và trùng ý; kho nhỏ quá thì đành lặp (dup = số câu lặp)
+function buildRound(kinds, keys, upTo, rng = Math.random, n = ROUND_LEN) {
+  const out = [], seen = new Set(); let dup = 0;
+  const gen = () => { const kind = kinds[Math.floor(rng() * kinds.length) % kinds.length], kn = keys === 'C' ? 'C' : SKILL_KEYS[Math.floor(rng() * SKILL_KEYS.length) % SKILL_KEYS.length];
+    return skillQuestion(kind, skillKey(kn), upTo, rng); };
+  for (let a = 0; a < n * 60 && out.length < n; a++) { const q = gen(); if (q && !seen.has(q.key) && !out.some(o => sameIdea(o, q))) { seen.add(q.key); out.push(q); } }
+  for (let a = 0; a < n * 60 && out.length < n; a++) { const q = gen(); if (q && !seen.has(q.key)) { seen.add(q.key); out.push(q); } }   // chấp nhận "cùng ý", vẫn khác câu
+  // kho nhỏ hơn n (một dạng ở giọng C): lặp lại lần lượt cả kho (xáo thứ tự lựa chọn) nên câu giống nhau cách xa nhau
+  const pool = out.slice(); for (let a = 0; pool.length && out.length < n; a++) { const q = pool[a % pool.length]; out.push({ ...q, choices: shuf(q.choices, rng) }); dup++; }
+  return { qs: out, dup };
+}
+// Số câu khác nhau (theo key) mà một dạng sinh được ở một giọng: lấy mẫu 400 lần với rng cố định, nhớ kết quả
+const distinctCache = {};
+function distinctCount(kind, keys, upTo) {
+  const id = `${kind}|${keys}|${upTo}`; if (id in distinctCache) return distinctCache[id];
+  const rng = seededRng(1), seen = new Set();
+  for (let a = 0; a < 400; a++) { const kn = keys === 'C' ? 'C' : SKILL_KEYS[Math.floor(rng() * SKILL_KEYS.length) % SKILL_KEYS.length], q = skillQuestion(kind, skillKey(kn), upTo, rng); if (q) seen.add(q.key); }
+  return distinctCache[id] = seen.size;
+}
+const fmtSec = ms => (Math.round(ms / 100) / 10).toString().replace('.', ',') + ' giây';
+const fmtDur = ms => ms >= 60000 ? `${Math.floor(ms / 60000)} phút ${String(Math.floor(ms % 60000 / 1000)).padStart(2, '0')} giây` : fmtSec(ms);
+
 // ---------- lưu tiến độ ----------
 const STORE_KEY = 'phildave-v1';
 // Mở bằng ?test: không đọc/ghi bộ nhớ thật để test luôn chạy từ mặc định
@@ -733,13 +805,19 @@ const TEST_MODE = typeof location !== 'undefined' && /[?&]test/.test(location.se
 const shouldRegisterSW = protocol => protocol === 'http:' || protocol === 'https:';
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 function loadProgress(storage) {
-  const p = { done: {}, wrong: {}, recent: {}, settings: { level: 3, bpm: 72 } };   // recent: bài → key các câu của lần làm quiz trước
+  const p = { done: {}, wrong: {}, recent: {}, history: {}, quiz: { play: 'free', mode: null, keys: 'C', timer: 'mid' }, settings: { level: 3, bpm: 72 } };   // recent: bài → key các câu của lần làm quiz trước
   try {
     if (storage === undefined) storage = globalThis.localStorage;
     const raw = JSON.parse(storage.getItem(STORE_KEY));
     if (!isObj(raw)) return p;
     if (isObj(raw.done)) p.done = raw.done;
     if (isObj(raw.wrong)) p.wrong = raw.wrong;
+    p.history = sanitizeHistory(raw.history);
+    if (isObj(raw.quiz)) { const q = raw.quiz;   // lựa chọn ở tab Đố: chế độ, dạng câu, giọng, mốc giờ
+      if (q.play === 'free' || q.play === 'run') p.quiz.play = q.play;
+      if (typeof q.mode === 'string' && q.mode.length < 40) p.quiz.mode = q.mode;
+      if (q.keys === 'C' || q.keys === 'many') p.quiz.keys = q.keys;
+      if (TIMER_LEVELS.some(t => t.id === q.timer)) p.quiz.timer = q.timer; }
     if (isObj(raw.recent)) for (const [k, v] of Object.entries(raw.recent)) if (Array.isArray(v)) p.recent[k] = v.filter(x => typeof x === 'string');
     if (isObj(raw.settings)) {
       const { level, bpm } = raw.settings;
@@ -1687,6 +1765,65 @@ const p4Batch = (task, a, b) => ({ name:`GĐ4-T${task}: Phildave 4 bài ${a}–$
   }
   if (bad.length) throw [...new Set(bad)].join('; '); } });
 const TESTS = [
+{ name:'Vượt màn P7: giới hạn 50 lần tính theo từng tổ hợp dạng + giọng + mốc giờ; sanitizeHistory bỏ khoá __proto__/constructor', fn() {
+    const A = (keys, timer, at) => ({ kind: 'mix', keys, timer, score: 20, ms: 1000, at });
+    let h = addAttempt({}, A('many', 'fast', 0)); for (let i = 1; i <= 120; i++) h = addAttempt(h, A('C', 'mid', i));
+    eq(h.mix.filter(a => a.keys === 'C').length, 50); eq(h.mix.filter(a => a.keys === 'many').length, 1); eq(h.mix[0].at, 0); eq(h.mix.length, 51);   // kỷ lục cũ của tổ hợp ít chơi còn đó
+    eq(sanitizeHistory({ mix: Array.from({ length: 80 }, (_, i) => A('C', 'mid', i)) }).mix.length, 50);
+    const raw = JSON.parse('{"__proto__":[{"kind":"x","keys":"C","timer":"mid","score":1,"ms":1,"at":1}],"constructor":[{"kind":"x","keys":"C","timer":"mid","score":1,"ms":1,"at":1}],"mix":[]}');
+    const o = sanitizeHistory(raw); eq(Object.getPrototypeOf(o), Object.prototype); eq(Object.keys(o).length, 0); eq(Array.isArray(o.constructor), false); } },
+{ name:'Vượt màn P6: lựa chọn tab Đố (chế độ, dạng, giọng, mốc giờ) lưu và đọc lại; giá trị hỏng về mặc định', fn() {
+    const mem = {}, store = { getItem: k => mem[k] ?? null, setItem: (k, v) => { mem[k] = v; } };
+    eq(JSON.stringify(loadProgress(store).quiz), JSON.stringify({ play: 'free', mode: null, keys: 'C', timer: 'mid' }));
+    const p = loadProgress(store); p.quiz = { play: 'run', mode: 'friend', keys: 'many', timer: 'fast' }; saveProgress(p, store);
+    eq(JSON.stringify(loadProgress(store).quiz), JSON.stringify(p.quiz));
+    mem[STORE_KEY] = JSON.stringify({ quiz: { play: 'x', mode: 5, keys: 'Z', timer: 'turbo' } }); eq(JSON.stringify(loadProgress(store).quiz), JSON.stringify({ play: 'free', mode: null, keys: 'C', timer: 'mid' }));
+    mem[STORE_KEY] = JSON.stringify({ quiz: 'oops' }); eq(loadProgress(store).quiz.timer, 'mid'); } },
+{ fast:1, name:'Vượt màn P1: gradeRound — điểm, tổng và trung bình thời gian, qua ở đúng 27', fn() {
+    const mk = n => Array.from({ length: 30 }, (_, i) => ({ ok: i < n, ms: 1000 + i }));
+    const g = gradeRound(mk(27)); eq(g.score, 27); eq(g.total, 30); eq(g.passed, true); eq(g.totalMs, 30 * 1000 + 435); eq(Math.round(g.avgMs), 1015);
+    eq(gradeRound(mk(26)).passed, false); eq(gradeRound(mk(30)).passed, true); eq(gradeRound(mk(0)).score, 0);
+    eq(gradeRound([]).avgMs, 0); eq(PASS_MARK, 27); eq(ROUND_LEN, 30);
+    eq(TIMER_LEVELS.map(t => t.sec).join(), '20,12,7'); eq(TIMER_LEVELS.map(t => t.label).join(), 'Thong thả,Vừa,Nhanh'); } },
+{ fast:1, name:'Vượt màn P2: cmpAttempt — điểm cao hơn thắng, bằng điểm thì nhanh hơn thắng', fn() {
+    const a = (score, ms) => ({ score, ms });
+    ok(cmpAttempt(a(28, 900), a(27, 100)) > 0, 'điểm cao phải thắng dù chậm'); ok(cmpAttempt(a(27, 100), a(28, 900)) < 0);
+    ok(cmpAttempt(a(27, 100), a(27, 200)) > 0, 'bằng điểm nhanh hơn thắng'); ok(cmpAttempt(a(27, 200), a(27, 100)) < 0); eq(cmpAttempt(a(27, 100), a(27, 100)), 0); } },
+{ fast:1, name:'Vượt màn P3: compareAttempt — lần trước, kỷ lục, hơn/kém, kỷ lục mới; chỉ so cùng dạng + giọng + mốc giờ', fn() {
+    const A = (kind, keys, timer, score, ms, at) => ({ kind, keys, timer, score, ms, at });
+    const h = { mix: [A('mix', 'C', 'mid', 25, 200000, 1), A('mix', 'C', 'mid', 29, 300000, 2), A('mix', 'C', 'fast', 30, 100000, 3), A('mix', 'many', 'mid', 30, 90000, 4), A('mix', 'C', 'mid', 27, 250000, 5)],
+      friend: [A('friend', 'C', 'mid', 30, 50000, 6)] };
+    let c = compareAttempt(h, A('mix', 'C', 'mid', 28, 280000, 9));
+    eq(c.prev.at, 5); eq(c.best.at, 2); eq(c.vsPrev, 1); eq(c.isRecord, false); eq(c.count, 3);
+    c = compareAttempt(h, A('mix', 'C', 'mid', 26, 100, 9)); eq(c.vsPrev, -1);
+    c = compareAttempt(h, A('mix', 'C', 'mid', 29, 299999, 9)); eq(c.isRecord, true); eq(c.best.at, 2);   // bằng điểm kỷ lục, nhanh hơn
+    eq(compareAttempt(h, A('mix', 'C', 'mid', 29, 300000, 9)).isRecord, false);   // bằng hẳn: không phải kỷ lục mới
+    c = compareAttempt(h, A('mix', 'C', 'slow', 10, 1, 9)); eq(c.prev, null); eq(c.best, null); eq(c.vsPrev, null); eq(c.isRecord, true); eq(c.count, 0);
+    c = compareAttempt({}, A('mix', 'C', 'mid', 10, 1, 9)); eq(c.prev, null); eq(compareAttempt(null, A('x', 'C', 'mid', 1, 1, 1)).count, 0);
+    eq(selectionHistory(h, { kind: 'mix', keys: 'C', timer: 'mid' }).length, 3); eq(selectionHistory(h, { kind: 'friend', keys: 'C', timer: 'mid' }).length, 1); } },
+{ fast:1, name:'Vượt màn P4: addAttempt giữ tối đa 50 lần mới nhất mỗi dạng, không sửa bản cũ; sanitizeHistory bỏ dữ liệu hỏng; lưu và đọc lại được', fn() {
+    let h = {}; const base = Object.freeze({ kind: 'mix', keys: 'C', timer: 'mid', score: 20, ms: 1000 });
+    for (let i = 0; i < 60; i++) { const n = addAttempt(h, { ...base, at: i }); ok(n !== h, 'sửa tại chỗ'); h = n; }
+    eq(h.mix.length, 50); eq(h.mix[0].at, 10); eq(h.mix[49].at, 59);
+    h = addAttempt(h, { ...base, kind: 'friend', at: 100 }); eq(h.friend.length, 1); eq(h.mix.length, 50);
+    const dirty = { mix: [{ ...base, at: 1 }, { ...base, at: 2, score: 31 }, { ...base, at: 3, timer: 'x' }, { ...base, at: 4, keys: 'Z' }, null, { ...base, at: NaN }, { ...base, at: 5, extra: 1 }], bad: 5, friend: [] };
+    const s = sanitizeHistory(dirty); eq(s.mix.map(a => a.at).join(), '1,5'); ok(!('extra' in s.mix[1]) && !('bad' in s) && !('friend' in s), 'chưa lọc sạch');
+    eq(JSON.stringify(sanitizeHistory(null)), '{}'); eq(JSON.stringify(sanitizeHistory([1])), '{}');
+    const mem = {}, store = { getItem: k => mem[k] ?? null, setItem: (k, v) => { mem[k] = v; } };
+    const p = loadProgress(store); eq(JSON.stringify(p.history), '{}'); p.history = h; ok(saveProgress(p, store)); eq(loadProgress(store).history.mix.length, 50);
+    mem[STORE_KEY] = JSON.stringify({ done: { a: true } }); eq(JSON.stringify(loadProgress(store).history), '{}'); } },
+{ name:'Vượt màn P5: buildRound — đủ 30 câu, không trùng câu (và không "cùng ý") khi kho cho phép; dạng đã chọn đúng; giọng C hoặc nhiều giọng', fn() {
+    const all = SKILLS.map(s => s.id);
+    for (const keys of ['C', 'many']) for (const kinds of [all, ...all.map(k => [k])]) for (const seed of [1, 2, 3]) {
+      const { qs, dup } = buildRound(kinds, keys, 'p4-32', seededRng(seed)); eq(qs.length, 30);
+      ok(qs.every(q => kinds.includes(q.kind)), 'sai dạng'); ok(keys !== 'C' || qs.every(q => q.keyName === 'C'), 'có giọng khác C');
+      const distinct = new Set(qs.map(q => q.key)).size; eq(distinct + dup, 30);
+      if (kinds === all) { eq(dup, 0); eq(distinct, 30); ok(new Set(qs.map(q => q.kind)).size >= 4, 'Trộn ít dạng'); }
+      else { ok(distinct >= 4, `${kinds[0]}/${keys}: chỉ ${distinct} câu khác nhau`); if (keys === 'many') ok(dup <= 4, `${kinds[0]}/many lặp ${dup} câu`); }
+      ok(qs.every((q, i) => !i || q.key !== qs[i - 1].key), 'hai câu giống nhau đứng liền nhau');
+    }
+    // lưu ý: một dạng ở "Chỉ C" chỉ có 4–26 câu khác nhau nên màn 30 câu phải lặp; Trộn thì không lặp
+    const m = buildRound(['tones', 'motherTo'], 'C', 'p3-02', seededRng(5)); eq(m.qs.length, 30); } },
 { name:'GĐ2-T2b fix: "nốt dẫn" không phải guide tones; lesson hợp lệ; không khớp nhầm', fn() {
     ok(GLOSSARY.find(g => g.key === 'guide').vi.startsWith('nốt định hướng'), 'guide.vi');
     loadLessons().lessons.forEach(l => l.teach.forEach(t => [t.text, t.tip || ''].forEach(x => { const k = termsIn(x);
@@ -2650,7 +2787,7 @@ if (typeof document !== 'undefined') {
   const PART_ORDER = [3, 4, 1, 2];
   const esc = escHtml;
   let lessonRun = 0;   // đổi mỗi lần vào/ra bài, để callback trễ của bài cũ không chạy
-  function clearTarget() { lessonRun++; stopPlay(); resetPanel(); }
+  function clearTarget() { lessonRun++; stopPlay(); resetPanel(); cancelChallenge(); }
   function resetPanel() {
     demo = null; target = null; onDone = null; showing = false; tapped.clear();
     $('ptitle').textContent = 'Mở một bài ở mục Học, hoặc chạm hợp âm ở mục Tái hoà âm để luyện tay';
@@ -2795,22 +2932,141 @@ if (typeof document !== 'undefined') {
   // Menu dạng câu (thiết kế mục 10.4): mỗi dạng mở khi đã học xong bài dạy nó; "Trộn" lấy các dạng đã mở;
   // "Vòng hợp âm" là dạng cũ (luôn mở). Giọng: Chỉ C / Nhiều giọng (C G F D Bb A Eb). Điểm đúng/sai đếm trong phiên.
   let prog = ['C','Am','F','G'];
-  const quizState = { mode: null, keys: 'C', ok: 0, bad: 0, q: null };
+  const quizState = { ok: 0, bad: 0, q: null, ...progress.quiz };   // play: 'free' = Luyện tự do, 'run' = Vượt màn
+  const saveQuizPrefs = () => { progress.quiz = { play: quizState.play, mode: quizState.mode, keys: quizState.keys, timer: quizState.timer }; persist(); };   // ?test: persist() không ghi
   const openSkills = () => SKILLS.filter(s => progress.done[s.lesson]);
   function quiz() {
-    const open = openSkills(), st = quizState;
-    if (!st.mode || (st.mode === 'mix' && !open.length) || (SKILL_IDS.includes(st.mode) && !open.some(s => s.id === st.mode))) st.mode = open.length ? 'mix' : 'ring';
+    cancelChallenge();   // vào/đổi/vẽ lại tab Đố thì bỏ màn đang chơi (không lưu)
+    const open = openSkills(), st = quizState, runMode = st.play === 'run';
+    if (runMode && st.mode === 'ring' && open.length) st.mode = 'mix';   // Vòng hợp âm không có trong Vượt màn
+    if (!st.mode || !(st.mode === 'mix' || st.mode === 'ring' || SKILL_IDS.includes(st.mode)) || (st.mode === 'mix' && !open.length) || (SKILL_IDS.includes(st.mode) && !open.some(s => s.id === st.mode))) st.mode = open.length ? 'mix' : 'ring';
     const opt = (v, label, on) => `<option value="${v}"${on ? '' : ' disabled'}${st.mode === v ? ' selected' : ''}>${esc(label)}</option>`;
     const ring = st.mode === 'ring';
-    $('main').innerHTML = `<div class="card qbar"><label class="qlab">Dạng câu <select id="qmode">${opt('mix', open.length ? 'Trộn (các dạng đã học)' : '🔒 Trộn — học xong một bài để mở', open.length > 0)}` +
+    $('main').innerHTML = `<div class="card qbar"><div class="row" style="margin:0 0 6px"><button class="b seg${runMode ? '' : ' act'}" data-play="free">Luyện tự do</button><button class="b seg${runMode ? ' act' : ''}" data-play="run">Vượt màn</button></div><label class="qlab">Dạng câu <select id="qmode">${opt('mix', open.length ? 'Trộn (các dạng đã học)' : '🔒 Trộn — học xong một bài để mở', open.length > 0)}` +
       SKILLS.map(s => opt(s.id, progress.done[s.lesson] ? `${s.label} · ${lessonTag(s.lesson)}` : `🔒 ${s.label} — học ở ${lessonTag(s.lesson)}`, !!progress.done[s.lesson])).join('') +
-      opt('ring', `Vòng hợp âm (${prog.join(' ')})`, true) + `</select></label>
+      opt('ring', runMode ? 'Vòng hợp âm — chỉ có ở Luyện tự do' : `Vòng hợp âm (${prog.join(' ')})`, !runMode) + `</select></label>
       <div class="row"><button class="b seg${st.keys === 'C' ? ' act' : ''}" data-keys="C"${ring ? ' disabled' : ''}>Chỉ C</button><button class="b seg${st.keys === 'many' ? ' act' : ''}" data-keys="many"${ring ? ' disabled' : ''}>Nhiều giọng</button>
-      <span id="qscore" class="mut">Đúng ${st.ok} · Sai ${st.bad}</span></div>
+      ${runMode ? '' : `<span id="qscore" class="mut">Đúng ${st.ok} · Sai ${st.bad}</span>`}</div>
       ${open.length ? '' : `<p class="mut" id="qhint">Học xong bài ở mục Học để mở thêm dạng câu: dạng đầu tiên (${esc(SKILLS[0].label)}) mở sau ${lessonTag(SKILLS[0].lesson)}.</p>`}</div><div id="qbody"></div>`;
-    $('qmode').onchange = e => { st.mode = e.target.value; clearTarget(); quiz(); };
-    $('main').querySelectorAll('[data-keys]').forEach(b => b.onclick = () => { st.keys = b.dataset.keys; clearTarget(); quiz(); });
+    $('qmode').onchange = e => { st.mode = e.target.value; saveQuizPrefs(); clearTarget(); quiz(); };
+    $('main').querySelectorAll('[data-keys]').forEach(b => b.onclick = () => { st.keys = b.dataset.keys; saveQuizPrefs(); clearTarget(); quiz(); });
+    $('main').querySelectorAll('[data-play]').forEach(b => b.onclick = () => { st.play = b.dataset.play; saveQuizPrefs(); clearTarget(); quiz(); });
+    if (runMode) return challengeSetup(!ring);
     (ring ? ringQuestion : skillRound)();
+  }
+  // ---- Vượt màn (thiết kế mục 11): 30 câu, đếm ngược mỗi câu, ≥ 27 là qua ----
+  // challenge.clock / sec / history là chỗ để test cắm đồng hồ giả, số giây ngắn và lịch sử có sẵn
+  const challenge = { run: null, clock: () => performance.now(), sec: null, history: null, guardMs: TEST_MODE ? 0 : 300 };   // guardMs: sau khi sang câu mới, bỏ qua chạm trong ngần này ms (tránh chạm đúp trúng câu kế); test đặt 0
+  const timerOf = () => TIMER_LEVELS.find(t => t.id === quizState.timer) || TIMER_LEVELS[1];
+  const challengeHistory = () => challenge.history || progress.history;
+  function cancelChallenge() {
+    const r = challenge.run; challenge.run = null;
+    if (r && r.timerId != null) clearInterval(r.timerId);
+  }
+  const selOf = () => ({ kind: quizState.mode, keys: quizState.keys, timer: quizState.timer });
+  // biểu đồ cột: 10 lần gần nhất của lựa chọn, vạch ngang ở 27
+  function historyChart(history, sel) {
+    const h = selectionHistory(history, sel).slice(-10);
+    if (!h.length) return '<p class="mut">Chưa có lần làm nào với lựa chọn này (dạng + giọng + mốc giờ).</p>';
+    return `<div class="hchart" aria-label="Điểm ${h.length} lần gần nhất"><div class="hplot"><div class="hline" style="bottom:${PASS_MARK / ROUND_LEN * 100}%"><span>${PASS_MARK}</span></div>` +
+      h.map(a => `<div class="hcol" title="${esc(new Date(a.at).toLocaleDateString('vi-VN'))} · ${esc(fmtDur(a.ms))}"><div class="hbar${a.score >= PASS_MARK ? ' pass' : ''}" style="height:${a.score / ROUND_LEN * 100}%"></div><span>${a.score}</span></div>`).join('') + '</div></div>';
+  }
+  function challengeSetup(canRun) {
+    const st = quizState, sel = selOf();
+    const order = loadLessons().lessons.map(l => l.id).filter(id => progress.done[id]), thinN = canRun && st.keys === 'C' && st.mode !== 'mix' ? distinctCount(st.mode, 'C', order[order.length - 1] || null) : 99;
+    const thin = thinN < 15 ? thinN : 0;
+    $('qbody').innerHTML = `<div class="card"><h3>Vượt màn: ${ROUND_LEN} câu, đúng ≥ ${PASS_MARK} là qua</h3>
+      <div class="qlab">Giờ mỗi câu</div><div class="row">${TIMER_LEVELS.map(t => `<button class="b seg${st.timer === t.id ? ' act' : ''}" data-timer="${t.id}">${t.label} ${t.sec}s</button>`).join('')}</div>
+      <div class="row"><button class="b pri" id="qstart"${canRun ? '' : ' disabled'}>Bắt đầu màn</button></div>
+      <p class="mut">Mỗi câu có đồng hồ đếm ngược, hết giờ tính sai. Không có bước bấm thử.</p>
+      ${thin ? `<p class="mut" id="qthin">Dạng này ở giọng C chỉ có ${thin} câu khác nhau, màn sẽ lặp lại câu — chọn Nhiều giọng để đa dạng hơn.</p>` : ''}
+</div>
+      <div class="card"><div class="qlab">Điểm 10 lần gần nhất (cùng dạng, giọng, mốc giờ)</div>${canRun ? historyChart(challengeHistory(), sel) : '<p class="mut">Học xong một bài để mở dạng câu.</p>'}</div>`;
+    $('qbody').querySelectorAll('[data-timer]').forEach(b => b.onclick = () => { st.timer = b.dataset.timer; saveQuizPrefs(); quiz(); });
+    $('qstart').onclick = startChallenge;
+  }
+  function startChallenge() {
+    const st = quizState, open = openSkills(), order = loadLessons().lessons.map(l => l.id).filter(id => progress.done[id]);
+    const kinds = st.mode === 'mix' ? open.map(s => s.id) : [st.mode]; if (!kinds.length || st.mode === 'ring') return;
+    const { qs, dup } = buildRound(kinds, st.keys, order[order.length - 1] || null, Math.random);
+    if (qs.length < ROUND_LEN) { $('qbody').insertAdjacentHTML('afterbegin', '<p class="bad">Chưa sinh đủ câu hỏi, chọn dạng khác.</p>'); return; }
+    cancelChallenge();
+    challenge.run = { qs, dup, sel: selOf(), i: 0, res: [], wrong: [], timerId: null, limit: 0, t0: 0, answered: false };
+    askChallenge();
+  }
+  function askChallenge() {
+    const r = challenge.run, q = r.qs[r.i], s = SKILLS.find(x => x.id === q.kind);
+    r.limit = (challenge.sec != null ? challenge.sec : timerOf().sec) * 1000; r.answered = false;
+    $('main').innerHTML = `<div class="card"><div class="row" style="justify-content:space-between;margin:0"><b id="cprog">Câu ${r.i + 1}/${ROUND_LEN}</b><span id="cscore" class="mut">Đúng ${r.res.filter(x => x.ok).length} · Sai ${r.res.filter(x => !x.ok).length}</span><button class="b" id="cstop" style="margin:0">Dừng</button></div>
+      <div class="row" style="flex-wrap:nowrap;margin:8px 0 2px"><div class="tbar"><i id="tfill" style="width:100%"></i></div><b id="tsec" class="tsec">${Math.ceil(r.limit / 1000)}</b></div>
+      <div class="mut">${esc(s.label.replace(/ X$/, ''))} · giọng ${esc(q.keyName)}</div>
+      <h3>${renderTeachText(q.prompt)}</h3><div class="choices">${q.choices.map(c => `<button class="b" data-n="${esc(c)}">${esc(c)}</button>`).join('')}</div><div id="fb"></div></div>`;
+    $('cstop').onclick = () => {   // hỏi lại trong trang, đồng hồ dừng trong lúc hỏi
+      if (challenge.run !== r || $('cconfirm')) return; r.confirming = true; pauseChallenge();
+      $('cprog').closest('.card').querySelector('.row').insertAdjacentHTML('afterend', '<div id="cconfirm" class="row confirm"><span>Dừng màn này? Điểm không được lưu.</span><button class="b" id="cstopyes">Dừng hẳn</button><button class="b pri" id="cstopno">Tiếp tục</button></div>');
+      $('cstopyes').onclick = () => { if (challenge.run === r) { cancelChallenge(); quiz(); } };
+      $('cstopno').onclick = () => { if (challenge.run !== r) return; r.confirming = false; $('cconfirm').remove(); resumeChallenge(); };
+    };
+    r.armedAt = performance.now() + challenge.guardMs;
+    $('main').querySelectorAll('.choices [data-n]').forEach(b => b.onclick = () => { if (r.confirming || performance.now() < r.armedAt) return; answerChallenge(b.dataset.n); });
+    r.t0 = challenge.clock(); r.timerId = setInterval(challengeTick, 100);
+  }
+  // Tab trình duyệt bị ẩn: dừng đồng hồ câu đang hỏi; hiện lại thì chạy tiếp, phần đã trôi qua lúc ẩn không tính
+  function pauseChallenge() { const r = challenge.run; if (r && !r.answered && r.timerId != null) { clearInterval(r.timerId); r.timerId = null; r.hiddenAt = challenge.clock(); } }
+  function resumeChallenge() {   // chạy lại khi không còn lý do dừng (tab hiện, không đang hỏi xác nhận Dừng)
+    const r = challenge.run; if (!r || r.answered || document.hidden || r.confirming || r.timerId != null || r.hiddenAt == null) return;
+    r.t0 += challenge.clock() - r.hiddenAt; r.hiddenAt = null; r.timerId = setInterval(challengeTick, 100);
+  }
+  function onVisibility() { if (document.hidden) pauseChallenge(); else resumeChallenge(); }
+  document.addEventListener('visibilitychange', onVisibility);
+  // Gọi mỗi 100 ms; test gọi tay với đồng hồ giả. Chỉ chạy khi đang chờ trả lời.
+  function challengeTick() {
+    const r = challenge.run; if (!r || r.answered || r.hiddenAt != null) return;
+    const left = r.limit - (challenge.clock() - r.t0);
+    if (left <= 0) { answerChallenge(null); return; }
+    const f = $('tfill'), t = $('tsec'); if (!f || !t) return;
+    f.style.width = (left / r.limit * 100) + '%'; f.classList.toggle('low', left / r.limit <= 0.25); t.textContent = Math.ceil(left / 1000);
+  }
+  function answerChallenge(pick) {   // pick = null: hết giờ
+    const r = challenge.run; if (!r || r.answered) return;
+    if (pick !== null && challenge.clock() - r.t0 >= r.limit) pick = null;   // bấm trễ sau khi đã hết giờ không tính
+    r.answered = true; clearInterval(r.timerId); r.timerId = null;   // đồng hồ dừng suốt lúc xem đáp án
+    const q = r.qs[r.i], good = pick === q.answer, ms = Math.min(r.limit, Math.max(0, challenge.clock() - r.t0));
+    r.res.push({ ok: good, ms });
+    if (good) { nextChallenge(); return; }
+    r.wrong.push({ prompt: q.prompt, answer: q.answer, why: q.why, pick });
+    $('main').querySelectorAll('.choices [data-n]').forEach(b => { b.disabled = true; if (b.dataset.n === q.answer) b.classList.add('right'); else if (b.dataset.n === pick) b.classList.add('wrong'); });
+    const f = $('tfill'); if (f) f.style.width = '0%'; if ($('tsec')) $('tsec').textContent = pick === null ? '0' : $('tsec').textContent;
+    $('cscore').textContent = `Đúng ${r.res.filter(x => x.ok).length} · Sai ${r.res.filter(x => !x.ok).length}`;
+    $('fb').innerHTML = `<p class="why"><span class="bad">${pick === null ? 'Hết giờ.' : 'Chưa đúng.'}</span> Đáp án: <span class="ok">${esc(q.answer)}</span> — ${renderTeachText(q.why)}</p>
+      <div class="row"><button class="b pri" id="cnext">${r.i + 1 >= ROUND_LEN ? 'Xem kết quả' : 'Câu tiếp →'}</button></div>`;
+    $('cnext').onclick = () => { if (challenge.run === r) nextChallenge(); };
+  }
+  function nextChallenge() {
+    const r = challenge.run; r.i++;
+    if (r.i >= ROUND_LEN) finishChallenge(); else askChallenge();
+  }
+  function finishChallenge() {
+    const r = challenge.run, g = gradeRound(r.res), att = { ...r.sel, score: g.score, ms: Math.round(g.totalMs), at: Date.now() };
+    const before = challengeHistory(), cmp = compareAttempt(before, att), after = addAttempt(before, att);
+    if (!TEST_MODE && !challenge.history) { progress.history = after; persist(); }   // ?test không ghi gì
+    cancelChallenge();
+    const sc = SKILLS.find(x => x.id === r.sel.kind), kindLabel = r.sel.kind === 'mix' ? 'Trộn' : sc ? sc.label.replace(/ X$/, '') : r.sel.kind;
+    const diff = cmp.prev && (cmp.vsPrev === 0 ? 'y hệt lần trước'
+      : g.score !== cmp.prev.score ? `${g.score > cmp.prev.score ? 'cao hơn' : 'thấp hơn'} lần trước ${Math.abs(g.score - cmp.prev.score)} điểm`
+      : `bằng điểm, ${att.ms < cmp.prev.ms ? 'nhanh hơn' : 'chậm hơn'} ${fmtDur(Math.abs(att.ms - cmp.prev.ms))}`);
+    const line = a => `${a.score}/${ROUND_LEN} · ${fmtDur(a.ms)}`;
+    $('main').innerHTML = `<div class="card"><h3 class="${g.passed ? 'ok' : 'bad'}" id="cresult">${g.passed ? 'Qua màn!' : `Chưa qua — cần ${PASS_MARK}`}</h3>
+      <div class="bigscore" id="cfinal">${g.score}/${g.total}</div>
+      <p class="mut">${esc(kindLabel)} · ${r.sel.keys === 'C' ? 'chỉ C' : 'nhiều giọng'} · ${TIMER_LEVELS.find(t => t.id === r.sel.timer).label}</p>
+      <p>Tổng thời gian trả lời: <b>${esc(fmtDur(att.ms))}</b> · trung bình mỗi câu: <b>${esc(fmtSec(g.avgMs))}</b></p>
+      <p id="ccmp">${cmp.prev ? `So với lần trước (${line(cmp.prev)}): <b>${diff}</b>.` : 'Lần đầu với lựa chọn này.'}
+      ${cmp.isRecord ? (cmp.best ? ' <span class="ok">Kỷ lục mới!</span>' : ' <span class="ok">Đây là kỷ lục đầu tiên.</span>') : ` Kỷ lục: <b>${line(cmp.best)}</b>.`}</p>
+      <div class="row"><button class="b pri" id="cagain">Làm màn mới</button><button class="b" id="cfree">Về luyện tự do</button></div></div>
+      <div class="card"><div class="qlab">Điểm 10 lần gần nhất (vạch ${PASS_MARK} là mốc qua màn)</div>${historyChart(after, r.sel)}</div>` +
+      (r.wrong.length ? `<div class="card"><h3>Câu sai (${r.wrong.length})</h3>${r.wrong.map(w => `<div class="wq"><div>${renderTeachText(w.prompt)}</div><p>Đáp án: <span class="ok">${esc(w.answer)}</span>${w.pick === null ? ' · <span class="bad">hết giờ</span>' : ` · bạn chọn: <span class="bad">${esc(w.pick)}</span>`}</p><p class="why">${renderTeachText(w.why)}</p></div>`).join('')}</div>` : '<div class="card"><p class="ok">Không sai câu nào.</p></div>');
+    $('cagain').onclick = () => { quizState.mode = r.sel.kind; quizState.keys = r.sel.keys; quizState.timer = r.sel.timer; saveQuizPrefs(); startChallenge(); };
+    $('cfree').onclick = () => { quizState.play = 'free'; saveQuizPrefs(); quiz(); };
   }
   // một câu sai/đúng chỉ tính một lần: đúng ngay lần đầu → Đúng; có chọn sai → Sai
   const score = (wrongFirst) => { if (wrongFirst) quizState.bad++; else quizState.ok++; const e = $('qscore'); if (e) e.textContent = `Đúng ${quizState.ok} · Sai ${quizState.bad}`; };
@@ -3354,6 +3610,156 @@ if (typeof document !== 'undefined') {
           click('nav button[data-t="reharm"]'); click('[data-p="1-0"]'); click('#playNew');
           const lv = $('level'); lv.value = String(settings.level); lv.onchange({ target: lv }); eq(timers.length, 0);
         } finally { stopPlay(); click('nav button[data-t="learn"]'); } } },
+    { name:'Vượt màn D1: màn có menu chế độ; Vòng hợp âm không có trong Vượt màn; không có bước bấm thử; Câu n/30, thanh giờ và số giây', fn() {
+        const keep = JSON.stringify(progress), keepQ = { ...quizState }, keepClock = challenge.clock;
+        try {
+          progress.done = Object.fromEntries(loadLessons().lessons.map(l => [l.id, true]));
+          Object.assign(quizState, { mode: 'ring', keys: 'C', ok: 0, bad: 0, q: null, play: 'free', timer: 'mid' }); TABS.quiz();
+          ok($('qscore') && !$('qstart'), 'Luyện tự do phải như cũ'); click('[data-play="run"]');
+          ok(!$('qscore'), 'Vượt màn không dùng điểm phiên'); ok($('qmode').querySelector('option[value="ring"]').disabled, 'Vòng hợp âm không bị khoá'); ok($('qmode').value !== 'ring', 'vẫn đang ở Vòng hợp âm');
+          eq($('main').querySelector('[data-timer].act').dataset.timer, 'mid'); eq($('main').querySelectorAll('[data-timer]').length, 3);
+          ok($('main').textContent.includes('Thong thả 20s') && $('main').textContent.includes('Nhanh 7s'), 'thiếu mốc giờ');
+          click('[data-timer="fast"]'); eq(quizState.timer, 'fast'); click('[data-timer="mid"]');
+          let t = 1000; challenge.clock = () => t; $('qmode').value = 'motherOf'; $('qmode').onchange({ target: $('qmode') });
+          click('#qstart'); const r = challenge.run; ok(r, 'chưa bắt đầu màn'); eq(r.qs.length, 30); ok(r.qs.every(q => q.kind === 'motherOf'));
+          eq($('cprog').textContent, 'Câu 1/30'); eq($('tsec').textContent, '12'); ok($('tfill'), 'thiếu thanh giờ'); ok(!$('main').textContent.includes('bấm thử'), 'có bước bấm thử'); ok(!document.querySelector('[data-qnext]'), 'có nút Câu tiếp tự do');
+          t += 3000; challengeTick(); eq($('tsec').textContent, '9'); eq($('tfill').style.width, '75%'); ok(!$('tfill').classList.contains('low'));
+          t += 6500; challengeTick(); eq($('tsec').textContent, '3'); ok($('tfill').classList.contains('low'), 'thanh không đổi đỏ khi sắp hết');
+          ok($('main').scrollWidth <= $('main').clientWidth + 1 && document.documentElement.scrollWidth <= window.innerWidth + 1, 'màn câu hỏi tràn ngang');
+        } finally { cancelChallenge(); challenge.clock = keepClock; Object.assign(progress, JSON.parse(keep)); Object.assign(quizState, keepQ); clearTarget(); TABS.learn(); } } },
+    { name:'Vượt màn D2: hết giờ tính sai, hiện đáp án + giải thích, đồng hồ dừng khi xem đáp án, bấm Câu tiếp mới chạy lại', fn() {
+        const keep = JSON.stringify(progress), keepQ = { ...quizState }, keepClock = challenge.clock;
+        try {
+          progress.done = Object.fromEntries(loadLessons().lessons.map(l => [l.id, true]));
+          Object.assign(quizState, { mode: 'motherOf', keys: 'C', play: 'run', timer: 'mid' }); let t = 0; challenge.clock = () => t; TABS.quiz(); click('#qstart');
+          const r = challenge.run, q = r.qs[0]; ok(r.timerId != null, 'đồng hồ chưa chạy');
+          t += 12000; challengeTick();   // đúng 12 giây: hết giờ
+          eq(r.res.length, 1); eq(r.res[0].ok, false); eq(r.res[0].ms, 12000); eq(r.timerId, null);
+          ok($('fb').textContent.includes('Hết giờ') && $('fb').textContent.includes(q.answer), 'thiếu đáp án'); ok($('fb').querySelector('.why'), 'thiếu giải thích'); ok($('fb').textContent.includes(q.why.slice(0, 12)), 'thiếu why');
+          eq($('cscore').textContent, 'Đúng 0 · Sai 1'); eq($('cprog').textContent, 'Câu 1/30'); ok([...$('main').querySelectorAll('.choices [data-n]')].every(b => b.disabled), 'còn bấm được sau hết giờ');
+          t += 600000; challengeTick(); eq(r.res.length, 1); eq($('cprog').textContent, 'Câu 1/30');   // xem đáp án lâu bao nhiêu cũng không bị tính giờ
+          click('#cnext'); eq($('cprog').textContent, 'Câu 2/30'); eq($('tsec').textContent, '12'); ok(r.timerId != null, 'câu sau không có đồng hồ');
+          t += 4000; challengeTick(); eq($('tsec').textContent, '8');
+          // chọn sai: một lần là xong, ms đo đúng, đồng hồ dừng
+          const q2 = r.qs[1], w = q2.choices.find(c => c !== q2.answer); document.querySelector(`.choices [data-n="${w}"]`).click();
+          eq(r.res[1].ok, false); eq(r.res[1].ms, 4000); eq(r.timerId, null); ok(document.querySelector('.choices .wrong') && document.querySelector('.choices .right'), 'không tô đúng/sai');
+          document.querySelector(`.choices [data-n="${q2.answer}"]`).click(); eq(r.res.length, 2);   // bấm lại sau khi đã trả lời không tính thêm
+          click('#cnext'); const q3 = r.qs[2]; t += 2500; document.querySelector(`.choices [data-n="${q3.answer}"]`).click();   // đúng: sang câu kế ngay, không bước bấm thử
+          eq(r.res[2].ok, true); eq(r.res[2].ms, 2500); eq($('cprog').textContent, 'Câu 4/30'); eq($('cscore').textContent, 'Đúng 1 · Sai 2');
+        } finally { cancelChallenge(); challenge.clock = keepClock; Object.assign(progress, JSON.parse(keep)); Object.assign(quizState, keepQ); clearTarget(); TABS.learn(); } } },
+    { name:'Vượt màn D3: màn đủ 30 câu tới màn kết quả — 27/30 qua, 26/30 chưa qua; tổng/TB thời gian, danh sách câu sai; ?test không ghi lịch sử', fn() {
+        const keep = JSON.stringify(progress), keepQ = { ...quizState }, keepClock = challenge.clock, lsBefore = JSON.stringify(Object.entries(localStorage));
+        const play = (good) => { let t = 0; challenge.clock = () => t; challenge.history = null; TABS.quiz(); click('#qstart'); const r = challenge.run;
+          for (let i = 0; i < 30; i++) { const q = r.qs[i]; t += 1500; const pick = i < good ? q.answer : q.choices.find(c => c !== q.answer);
+            document.querySelector(`.choices [data-n="${pick}"]`).click(); if (i >= good) { ok($('fb').textContent.includes(q.answer), 'thiếu đáp án'); click('#cnext'); } }
+          return r; };
+        try {
+          progress.done = Object.fromEntries(loadLessons().lessons.map(l => [l.id, true])); progress.history = {};
+          Object.assign(quizState, { mode: 'mix', keys: 'many', play: 'run', timer: 'slow' });
+          let r = play(27); ok(!challenge.run, 'màn xong vẫn còn run'); eq($('cresult').textContent, 'Qua màn!'); ok($('cresult').classList.contains('ok')); eq($('cfinal').textContent, '27/30');
+          ok($('main').textContent.includes('45 giây') && $('main').textContent.includes('1,5 giây'), 'tổng 45 giây, TB 1,5 giây: ' + $('main').textContent.slice(0, 200)); eq($('main').querySelectorAll('.wq').length, 3);
+          ok($('main').textContent.includes('Lần đầu với lựa chọn này'), 'lần đầu'); ok($('main').querySelector('.hchart .hbar'), 'thiếu biểu đồ');
+          ok($('main').scrollWidth <= $('main').clientWidth + 1 && document.documentElement.scrollWidth <= window.innerWidth + 1, 'màn kết quả tràn ngang');
+          r = play(26); eq($('cresult').textContent, 'Chưa qua — cần 27'); ok($('cresult').classList.contains('bad')); eq($('cfinal').textContent, '26/30'); eq($('main').querySelectorAll('.wq').length, 4);
+          r = play(30); eq($('cresult').textContent, 'Qua màn!'); ok($('main').textContent.includes('Không sai câu nào'));
+          eq(JSON.stringify(progress.history), '{}'); eq(JSON.stringify(Object.entries(localStorage)), lsBefore);   // TEST_MODE: không ghi gì
+          click('#cagain'); ok(challenge.run && $('cprog').textContent === 'Câu 1/30', 'Làm màn mới không bắt đầu màn'); eq(challenge.run.sel.keys, 'many'); eq(challenge.run.sel.timer, 'slow'); cancelChallenge();
+          play(30); click('#cfree'); eq(quizState.play, 'free'); ok($('qscore'), 'không về Luyện tự do');
+        } finally { cancelChallenge(); challenge.clock = keepClock; challenge.history = null; Object.assign(progress, JSON.parse(keep)); Object.assign(quizState, keepQ); clearTarget(); TABS.learn(); } } },
+    { name:'Vượt màn D4: so sánh với lần trước và kỷ lục bằng lịch sử cắm vào; biểu đồ 10 lần có vạch 27; ?test không ghi', fn() {
+        const keep = JSON.stringify(progress), keepQ = { ...quizState }, keepClock = challenge.clock;
+        const A = (score, ms, at, timer = 'mid') => ({ kind: 'mix', keys: 'C', timer, score, ms, at });
+        try {
+          progress.done = Object.fromEntries(loadLessons().lessons.map(l => [l.id, true])); Object.assign(quizState, { mode: 'mix', keys: 'C', play: 'run', timer: 'mid' });
+          challenge.history = { mix: [A(29, 120000, 1), ...Array.from({ length: 11 }, (_, i) => A(20 + i % 5, 100000, 2 + i)), A(26, 90000, 20), A(30, 1, 21, 'fast')] };
+          let t = 0; challenge.clock = () => t; TABS.quiz();
+          eq($('main').querySelectorAll('.hbar').length, 10); ok($('main').querySelector('.hline'), 'thiếu vạch 27'); eq($('main').querySelector('.hline span').textContent, '27');
+          eq(JSON.stringify([...$('main').querySelectorAll('.hcol > span')].map(e => +e.textContent).slice(-1)), '[26]');
+          click('#qstart'); const r = challenge.run;
+          for (let i = 0; i < 30; i++) { const q = r.qs[i]; t += 1000; const pick = i < 28 ? q.answer : q.choices.find(c => c !== q.answer); document.querySelector(`.choices [data-n="${pick}"]`).click(); if (i >= 28) click('#cnext'); }
+          const c = $('ccmp').textContent; ok(c.includes('26/30') && c.includes('cao hơn lần trước 2 điểm'), c); ok(c.includes('Kỷ lục:') && c.includes('29/30') && !c.includes('Kỷ lục mới'), c);
+          eq($('main').querySelectorAll('.hbar').length, 10); eq($('main').querySelector('.hcol:last-of-type > span').textContent, '28');   // lần vừa làm hiện ở cuối biểu đồ
+          eq(challenge.history.mix.length, 14);   // lịch sử cắm vào không bị sửa
+          challenge.history = { mix: [A(28, 31000, 1)] }; click('#cagain'); const r2 = challenge.run;
+          for (let i = 0; i < 30; i++) { const q = r2.qs[i]; t += 1000; const pick = i < 28 ? q.answer : q.choices.find(c => c !== q.answer); document.querySelector(`.choices [data-n="${pick}"]`).click(); if (i >= 28) click('#cnext'); }
+          ok($('ccmp').textContent.includes('Kỷ lục mới'), 'bằng điểm, nhanh hơn: phải là kỷ lục mới — ' + $('ccmp').textContent); ok($('ccmp').textContent.includes('nhanh hơn'), $('ccmp').textContent);
+        } finally { cancelChallenge(); challenge.clock = keepClock; challenge.history = null; Object.assign(progress, JSON.parse(keep)); Object.assign(quizState, keepQ); clearTarget(); TABS.learn(); } } },
+    { name:'Vượt màn D5: nút Dừng, đổi tab, đổi mức tay và đổi chế độ đều huỷ màn và không còn đồng hồ chạy; không lưu', fn() {
+        const keep = JSON.stringify(progress), keepQ = { ...quizState }, keepClock = challenge.clock, realSet = window.setInterval, realClear = window.clearInterval, live = new Set();
+        window.setInterval = (f, ms) => { const id = realSet(f, ms); live.add(id); return id; }; window.clearInterval = id => { live.delete(id); realClear(id); };
+        const begin = () => { TABS.quiz(); click('#qstart'); ok(challenge.run && live.size === 1, 'màn không có đúng một đồng hồ: ' + live.size); return challenge.run; };
+        try {
+          progress.done = Object.fromEntries(loadLessons().lessons.map(l => [l.id, true])); Object.assign(quizState, { mode: 'mix', keys: 'C', play: 'run', timer: 'fast' });
+          let t = 0; challenge.clock = () => t; challenge.history = null; const h0 = JSON.stringify(progress.history);
+          let r = begin(); click('#cstop'); eq(live.size, 0); click('#cstopyes'); eq(challenge.run, null); ok($('qstart'), 'Dừng không về màn chọn'); eq(JSON.stringify(progress.history), h0);
+          r = begin(); r.qs.slice(0, 1); document.querySelector(`.choices [data-n="${r.qs[0].answer}"]`).click(); ok(live.size === 1, 'câu 2 không có đồng hồ');   // Dừng giữa chừng sau vài câu
+          click('#cstop'); eq(live.size, 0); click('#cstopyes'); eq(JSON.stringify(progress.history), h0);
+          begin(); click('nav button[data-t="learn"]'); eq(live.size, 0); eq(challenge.run, null); t += 99999; challengeTick(); eq(live.size, 0);
+          begin(); click('nav button[data-t="reharm"]'); eq(live.size, 0); eq(challenge.run, null);
+          click('nav button[data-t="quiz"]'); click('#qstart'); eq(live.size, 1); const lv = $('level'); lv.value = String(settings.level); lv.onchange({ target: lv }); eq(live.size, 0); eq(challenge.run, null);
+          begin(); click('nav button[data-t="quiz"]'); eq(live.size, 0); eq(challenge.run, null);   // bấm lại tab Đố cũng huỷ màn
+        } finally { cancelChallenge(); window.setInterval = realSet; window.clearInterval = realClear; challenge.clock = keepClock; Object.assign(progress, JSON.parse(keep)); Object.assign(quizState, keepQ); clearTarget(); TABS.learn(); } } },
+    { name:'Vượt màn D6: đồng hồ thật — số giây ngắn chạy xuống 0 thì tự tính sai, dừng khi xem đáp án, không có timer lạc sau khi đổi tab', async fn() {
+        const keep = JSON.stringify(progress), keepQ = { ...quizState }, keepSec = challenge.sec, wait = ms => new Promise(r => setTimeout(r, ms));
+        try {
+          progress.done = Object.fromEntries(loadLessons().lessons.map(l => [l.id, true])); Object.assign(quizState, { mode: 'tones', keys: 'C', play: 'run', timer: 'fast' });
+          challenge.sec = 0.35; TABS.quiz(); click('#qstart'); const r = challenge.run;
+          await wait(700); eq(r.res.length, 1); eq(r.res[0].ok, false); ok($('fb').textContent.includes('Hết giờ'), 'không tự hết giờ');
+          await wait(600); eq(r.res.length, 1); eq($('cprog').textContent, 'Câu 1/30');   // không tự sang câu và không tính thêm trong lúc xem đáp án
+          click('#cnext'); click('nav button[data-t="learn"]'); await wait(700); eq(r.res.length, 1); eq(challenge.run, null);   // timer đã huỷ: không thêm kết quả
+        } finally { cancelChallenge(); challenge.sec = keepSec; Object.assign(progress, JSON.parse(keep)); Object.assign(quizState, keepQ); clearTarget(); TABS.learn(); } } },
+    { name:'Vượt màn D7: tab trình duyệt bị ẩn thì đồng hồ câu dừng, hiện lại chạy tiếp không mất giây; hết giờ lúc ẩn không tính', fn() {
+        const keep = JSON.stringify(progress), keepQ = { ...quizState }, keepClock = challenge.clock, realSet = window.setInterval, realClear = window.clearInterval, live = new Set();
+        window.setInterval = (f, ms) => { const id = realSet(f, ms); live.add(id); return id; }; window.clearInterval = id => { live.delete(id); realClear(id); };
+        let hidden = false; Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+        const vis = h => { hidden = h; document.dispatchEvent(new Event('visibilitychange')); };
+        try {
+          progress.done = Object.fromEntries(loadLessons().lessons.map(l => [l.id, true])); Object.assign(quizState, { mode: 'motherOf', keys: 'C', play: 'run', timer: 'mid' });
+          let t = 0; challenge.clock = () => t; TABS.quiz(); click('#qstart'); const r = challenge.run; eq(live.size, 1);
+          t += 5000; challengeTick(); eq($('tsec').textContent, '7');
+          vis(true); eq(live.size, 0); t += 600000; challengeTick(); eq(r.res.length, 0); eq($('tsec').textContent, '7');   // ẩn lâu cũng không hết giờ
+          vis(true); eq(live.size, 0);
+          vis(false); eq(live.size, 1); challengeTick(); eq($('tsec').textContent, '7'); eq(r.res.length, 0);
+          t += 6000; challengeTick(); eq($('tsec').textContent, '1'); t += 1000; challengeTick(); eq(r.res.length, 1); eq(r.res[0].ms, 12000); eq(live.size, 0);
+          // đang xem đáp án: ẩn/hiện không bật lại đồng hồ
+          vis(true); vis(false); eq(live.size, 0); click('#cnext'); eq(live.size, 1);
+          // dừng màn khi đang ẩn rồi hiện: không có timer
+          vis(true); click('#cstop'); click('#cstopyes'); vis(false); eq(live.size, 0); eq(challenge.run, null);
+        } finally { hidden = false; delete document.hidden; cancelChallenge(); window.setInterval = realSet; window.clearInterval = realClear; challenge.clock = keepClock; Object.assign(progress, JSON.parse(keep)); Object.assign(quizState, keepQ); clearTarget(); TABS.learn(); } } },
+    { name:'Vượt màn D8: màn chọn nhắc khi dạng ở giọng C có dưới 15 câu khác nhau, không tự đổi lựa chọn; lựa chọn được nhớ trong progress nhưng ?test không ghi bộ nhớ', fn() {
+        const keep = JSON.stringify(progress), keepQ = { ...quizState }, lsBefore = JSON.stringify(Object.entries(localStorage));
+        try {
+          progress.done = Object.fromEntries(loadLessons().lessons.map(l => [l.id, true])); Object.assign(quizState, { mode: 'subst', keys: 'C', play: 'run', timer: 'mid' }); TABS.quiz();
+          const n = distinctCount('subst', 'C', 'p4-32'); ok(n >= 3 && n < 15, 'N=' + n); ok($('qthin') && $('qthin').textContent === `Dạng này ở giọng C chỉ có ${n} câu khác nhau, màn sẽ lặp lại câu — chọn Nhiều giọng để đa dạng hơn.`, $('qthin') && $('qthin').textContent);
+          eq(quizState.keys, 'C'); eq(quizState.mode, 'subst'); eq(distinctCount('subst', 'C', 'p4-32'), n); ok('subst|C|p4-32' in distinctCache, 'chưa nhớ kết quả');
+          click('[data-keys="many"]'); ok(!$('qthin'), 'Nhiều giọng mà vẫn nhắc'); eq(quizState.keys, 'many'); click('[data-keys="C"]'); ok($('qthin'));
+          $('qmode').value = 'mix'; $('qmode').onchange({ target: $('qmode') }); ok(!$('qthin'), 'Trộn không cần nhắc');
+          click('[data-timer="fast"]'); click('[data-keys="many"]'); click('[data-play="free"]');
+          eq(JSON.stringify(progress.quiz), JSON.stringify({ play: 'free', mode: 'mix', keys: 'many', timer: 'fast' })); eq(JSON.stringify(Object.entries(localStorage)), lsBefore);
+        } finally { cancelChallenge(); Object.assign(progress, JSON.parse(keep)); Object.assign(quizState, keepQ); clearTarget(); TABS.learn(); } } },
+    { name:'Vượt màn D9: mode lỗi thời đã lưu về Trộn (hoặc ring nếu chưa học gì) ở cả hai chế độ; bấm trễ sau hết giờ không tính; chạm đúp trúng câu kế bị bỏ qua; Dừng hỏi lại và dừng đồng hồ lúc hỏi', async fn() {
+        const keep = JSON.stringify(progress), keepQ = { ...quizState }, keepClock = challenge.clock, keepGuard = challenge.guardMs, realSet = window.setInterval, realClear = window.clearInterval, live = new Set(), wait = ms => new Promise(r => setTimeout(r, ms));
+        window.setInterval = (f, ms) => { const id = realSet(f, ms); live.add(id); return id; }; window.clearInterval = id => { live.delete(id); realClear(id); };
+        try {
+          progress.done = Object.fromEntries(loadLessons().lessons.map(l => [l.id, true]));
+          for (const play of ['free', 'run']) { Object.assign(quizState, { mode: 'foo', play, keys: 'C' }); TABS.quiz(); eq(quizState.mode, 'mix'); eq($('qmode').value, 'mix'); ok($('qbody').innerHTML.length > 50, 'tab Đố trống với mode lỗi'); }
+          progress.done = {}; Object.assign(quizState, { mode: 'foo', play: 'free' }); TABS.quiz(); eq(quizState.mode, 'ring');
+          progress.done = Object.fromEntries(loadLessons().lessons.map(l => [l.id, true]));
+          Object.assign(quizState, { mode: 'motherOf', keys: 'C', play: 'run', timer: 'mid' }); let t = 0; challenge.clock = () => t; TABS.quiz(); click('#qstart'); const r = challenge.run, q = r.qs[0];
+          t += 12050; document.querySelector(`.choices [data-n="${q.answer}"]`).click();   // đúng nhưng đã quá giờ
+          eq(r.res[0].ok, false); eq(r.res[0].ms, 12000); ok($('fb').textContent.includes('Hết giờ'), 'không báo hết giờ');
+          // hỏi lại khi Dừng: đồng hồ dừng, Tiếp tục thì chạy lại và không mất giây
+          click('#cnext'); t += 3000; challengeTick(); eq($('tsec').textContent, '9'); eq(live.size, 1);
+          click('#cstop'); ok($('cconfirm'), 'không hỏi lại'); eq(live.size, 0); eq(challenge.run, r); t += 300000; challengeTick(); eq(r.res.length, 1);
+          const q2 = r.qs[1]; document.querySelector(`.choices [data-n="${q2.answer}"]`).click(); eq(r.res.length, 1);   // đang hỏi xác nhận: chạm đáp án không tính
+          click('#cstopno'); ok(!$('cconfirm')); eq(live.size, 1); challengeTick(); eq($('tsec').textContent, '9'); ok(challenge.run === r);
+          click('#cstop'); click('#cstopyes'); eq(live.size, 0); eq(challenge.run, null); ok($('qstart'), 'Dừng hẳn không về màn chọn');
+          // chống chạm đúp: sau khi sang câu mới, chạm trong 300 ms bị bỏ qua
+          challenge.guardMs = 300; click('#qstart'); const r2 = challenge.run; await wait(350);
+          document.querySelector(`.choices [data-n="${r2.qs[0].answer}"]`).click(); eq(r2.res.length, 1); eq($('cprog').textContent, 'Câu 2/30');
+          document.querySelector(`.choices [data-n="${r2.qs[1].answer}"]`).click(); eq(r2.res.length, 1);   // chạm trễ ngay sau khi sang câu
+          await wait(350); document.querySelector(`.choices [data-n="${r2.qs[1].answer}"]`).click(); eq(r2.res.length, 2);
+        } finally { cancelChallenge(); window.setInterval = realSet; window.clearInterval = realClear; challenge.clock = keepClock; challenge.guardMs = keepGuard; Object.assign(progress, JSON.parse(keep)); Object.assign(quizState, keepQ); clearTarget(); TABS.learn(); } } },
   ];
   if (/[?&]test/.test(location.search)) {
     $('main').innerHTML = '<div class="card"><h3>Đang chạy test…</h3><p class="mut">Bộ rà chọi mất khoảng 10–20 giây.</p></div>';
