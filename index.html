@@ -85,7 +85,7 @@
 </style>
 </head>
 <body>
-<header><b>Phildave</b><label style="font-size:12px;margin-left:12px">Mức tay <select id="level"><option>1</option><option>2</option><option selected>3</option><option>4</option></select></label><span id="snd" title="Âm piano: FluidR3_GM (Frank Wen), CC BY 3.0" style="font-size:12px;margin-left:12px">♪ tổng hợp</span><span id="midi">● chưa nối đàn</span></header>
+<header><b>Phildave</b><label style="font-size:12px;margin-left:12px">Mức tay <select id="level"><option>1</option><option>2</option><option selected>3</option><option>4</option></select></label><label style="font-size:12px;margin-left:12px" title="Âm lượng">🔊 <input type="range" id="vol" min="0.4" max="3" step="0.1" style="width:80px;vertical-align:middle"></label><span id="snd" title="Âm piano: FluidR3_GM (Frank Wen), CC BY 3.0" style="font-size:12px;margin-left:12px">♪ tổng hợp</span><span id="midi">● chưa nối đàn</span></header>
 <nav>
   <button data-t="learn" class="act">Học</button>
   <button data-t="quiz">Đố</button>
@@ -156,7 +156,7 @@
       {"text": "7 hợp âm dựng từ chính các nốt của giọng C (chỉ phím trắng) gọi là hợp âm trong giọng (diatonic): Cmaj7, Dm7, Em7, Fmaj7, G7, Am7, Bm7b5. Trong 7 hợp âm này, chỉ G7 (G–B–D–F) có tritone B–F giữa bậc 3 và bậc 7. Vì thế G7 là hợp âm át 7 duy nhất của giọng C.", "show": "G7", "play": ["G7", "C"]},
       {"text": "Ra ngoài phím trắng, A7, D7, E7, B7 và cả Bb7 đều có tritone. Ví dụ E7 = E G# B D: bậc 3 là G#, bậc 7 là D, và G#–D là một tritone. Cứ là hợp âm 7 (ghi số 7 không kèm maj hay m) thì bậc 3 và bậc 7 luôn là tritone như vậy, tức là một \"mẹ\".", "tip": "Dựng nhanh hợp âm 7 từ bất kỳ nốt nào: hợp âm trưởng của nốt đó + nốt gốc lùi một cung (E7 = hợp âm E là E G# B, thêm D).", "show": "E7", "play": ["E7", "Am"]},
       {"text": "Nốt màu (tension) là các nốt 9, 11, 13 xếp thêm lên hợp âm 7 cho nghe giàu hơn. Ví dụ nốt 9 của G7 là A: chính là nốt ngay trên G (G, A), nhưng đặt cao lên một quãng 8. G9 vẫn kéo về C như G7, chỉ nghe đầy đặn hơn.", "tip": "Cách tính nhanh: 9 = nốt thứ 2, 11 = nốt thứ 4, 13 = nốt thứ 6 tính từ nốt gốc, chỉ đặt cao lên một quãng 8 (G7: 9 là A, 11 là C, 13 là E).", "show": "G9", "compare": {"a": {"label": "G7 → C", "play": ["G7", "C"]}, "b": {"label": "G9 → C", "play": ["G9", "C"]}}},
-      {"text": "Thăng hoặc giáng nốt màu đi nửa cung thì ta có màu biến đổi, hay gặp nhất là b9, #9, b13 (gọi chung là màu altered). Màu biến đổi nghe rất căng, nên chỉ hợp với hợp âm vốn đã căng, tức hợp âm có tritone. Ví dụ E7 thêm b9 (nốt F) thành E7(b9), về Am rất đẹp. Cách đọc: dấu đọc trước số, b9 là \"flat 9\", #9 là \"sharp 9\".", "tip": "b9 là phím ngay trên nốt gốc (E7: E nhích lên nửa cung là F), đặt cao lên một quãng 8.", "show": "E7(b9)", "compare": {"a": {"label": "E7 → Am", "play": ["E7", "Am"]}, "b": {"label": "E7(b9) → Am", "play": ["E7(b9)", "Am"]}}}
+      {"text": "Thăng hoặc giáng nốt màu đi nửa cung thì ta có màu biến đổi, hay gặp nhất là b9, #9, b13 (gọi chung là màu altered). Màu biến đổi nghe rất căng, nên chỉ hợp với hợp âm vốn đã căng, tức hợp âm có tritone. Ví dụ E7 thêm b9 (nốt F) thành E7(b9), về Am rất đẹp. Cách đọc: dấu đọc trước số, b9 là \"flat 9\", #9 là \"sharp 9\".", "tip": "b9 là phím ngay trên nốt gốc (E7: E nhích lên nửa cung là F), đặt cao lên một quãng 8. Khi nghe so sánh, để ý nốt cao nhất: E7 giữ E, còn E7(b9) có F rồi trượt xuống E của Am.", "show": "E7(b9)", "compare": {"a": {"label": "E7 → Am", "play": [["E2", "D3", "G#3", "B3", "E4"], ["A2", "A3", "C4", "E4"]]}, "b": {"label": "E7(b9) → Am", "play": [["E2", "D3", "G#3", "B3", "F4"], ["A2", "A3", "C4", "E4"]]}}}
     ],
     "remember": ["Trong 7 hợp âm trong giọng (diatonic) của C, chỉ G7 có tritone giữa bậc 3 và bậc 7.", "Hợp âm 7, tức hợp âm át 7 (G7, A7, D7, E7, B7, Bb7), đều có tritone giữa bậc 3 và bậc 7.", "Màu biến đổi (b9, #9, b13) chỉ dùng trên hợp âm có tritone."],
     "items": [{"chord": "G9", "to": "C"}, {"chord": "E7(b9)", "to": "Am"}],
@@ -280,7 +280,7 @@
       {"text": "Hợp âm trong giọng là phần cơ bản, hợp âm át phụ là phần biến hoá. Chỉ dùng nốt của âm giai C trưởng thì dù hay đến đâu vẫn nghe như nhạc thiếu nhi. Nốt ngoài âm giai chính là thứ tạo màu \"biến hoá\".", "compare": {"a": {"label": "Cơ bản", "play": ["C", "Am7", "Dm7", "G7", "C"]}, "b": {"label": "Biến hoá", "play": ["C", "A7", "Dm7", "G7", "C"]}}},
       {"text": "Mỗi hợp âm át phụ thêm một nốt ngoài âm giai: C7 có Bb, D7 có F#, E7 có G#, A7 có C#. Riêng B7 có tới hai (D#, F#) nên khé hơn.", "show": "E7", "play": ["E7", "Am7"]},
       {"text": "Nốt màu cơ bản của G7 trong giọng C là 9 và 13 (ưu tiên số 1), vì A và E vẫn nằm trong âm giai C. Màu biến đổi b9, b13 là biến hoá (ưu tiên số 2). Hãy chơi quen dạng cơ bản trước rồi mới biến hoá, thì màu biến hoá mới hợp.", "tip": "Nốt 9 của G7 là A (G lên một cung), nốt 13 là E (nốt 5 là D, lên một cung); cả hai đều là phím trắng nên nằm trong âm giai C.", "show": "G13", "compare": {"a": {"label": "Ưu tiên 1: G7(9 13) → C", "play": ["G13", "C"]}, "b": {"label": "Ưu tiên 2: G7(b9 b13) → C", "play": ["G7(b9 b13)", "C"]}}},
-      {"text": "Ở chỗ E7 (trước Am), có nhiều lựa chọn: E7 không thêm màu, hoặc E7 thêm màu biến đổi như b9, #9, b13. Màu biến đổi hợp ở đây vì E7 đi về hợp âm thứ Am.", "show": "E7(b9)", "compare": {"a": {"label": "E7 → Am", "play": ["E7", "Am"]}, "b": {"label": "E7(b9) → Am", "play": ["E7(b9)", "Am"]}}},
+      {"text": "Ở chỗ E7 (trước Am), có nhiều lựa chọn: E7 không thêm màu, hoặc E7 thêm màu biến đổi như b9, #9, b13. Màu biến đổi hợp ở đây vì E7 đi về hợp âm thứ Am.", "show": "E7(b9)", "compare": {"a": {"label": "E7 → Am", "play": [["E2", "D3", "G#3", "B3", "E4"], ["A2", "A3", "C4", "E4"]]}, "b": {"label": "E7(b9) → Am", "play": [["E2", "D3", "G#3", "B3", "F4"], ["A2", "A3", "C4", "E4"]]}}},
       {"text": "Bài tập ở giọng D: hợp âm trong giọng là D, Em, F#m, G, A, Bm, C#m7b5. \"Mẹ\" dẫn vào từng hợp âm: A7 → D, B7 → Em, C#7 → F#m, D7 → G, E7 → A, F#7 → Bm. Thầy nhấn mạnh đây là nền tảng cực kỳ quan trọng.", "play": ["A7", "D", "F#7", "Bm"]}
     ],
     "remember": ["Hợp âm trong giọng là cơ bản, hợp âm át phụ là biến hoá.", "G7 trong giọng C: màu cơ bản là 9 và 13 (ưu tiên 1); b9, b13 là biến hoá (ưu tiên 2).", "E7 về Am hợp với màu biến đổi (b9, #9, b13)."],
@@ -689,7 +689,7 @@ function loadLessons(text) {
   return { lessons, errors };
 }
 
-const settings = { level: 3, bpm: 72 };
+const settings = { level: 3, bpm: 72, vol: 1.6 };
 // Nhịp hợp lệ 50–120; giá trị không hợp lệ → 72
 function clampBpm(x) { return typeof x === 'number' && Number.isFinite(x) ? Math.min(120, Math.max(50, x)) : 72; }
 
@@ -704,9 +704,12 @@ function getAC() {
     try { ac = new AudioContext(); } catch (e) { ac = null; }
     // Mọi tiếng (mẫu + tổng hợp) đi chung: gain tổng → nén → loa, để nhiều nốt cùng lúc không bị rè
     if (ac) try {
-      const g = ac.createGain(), comp = ac.createDynamicsCompressor();
-      g.gain.value = 0.8; comp.threshold.value = -12; comp.knee.value = 10; comp.ratio.value = 4;
-      g.connect(comp); comp.connect(ac.destination); ac.master = g;
+      // gain tổng → nén (giữ đỉnh, không rè) → âm lượng (người dùng chỉnh) → loa
+      const g = ac.createGain(), comp = ac.createDynamicsCompressor(), out = ac.createGain();
+      g.gain.value = 1; comp.threshold.value = -20; comp.knee.value = 6; comp.ratio.value = 6;
+      if (comp.attack) comp.attack.value = 0.003; if (comp.release) comp.release.value = 0.25;
+      out.gain.value = settings.vol;
+      g.connect(comp); comp.connect(out); out.connect(ac.destination); ac.master = g; ac.out = out;
     } catch (e) { /* AudioContext giả/thiếu nút: nối thẳng ra loa */ }
   }
   return ac;
@@ -823,6 +826,8 @@ function loadProgress(storage) {
       const { level, bpm } = raw.settings;
       if (Number.isInteger(level) && level >= 1 && level <= 4) p.settings.level = level;
       if (typeof bpm === 'number' && Number.isFinite(bpm)) p.settings.bpm = bpm;
+      const { vol } = raw.settings;
+      if (typeof vol === 'number' && Number.isFinite(vol)) p.settings.vol = Math.min(3, Math.max(0.4, vol));
     }
   } catch (e) { /* bộ nhớ chặn hoặc dữ liệu hỏng → dùng mặc định */ }
   return p;
@@ -839,7 +844,7 @@ Object.assign(settings, progress.settings);
 settings.bpm = clampBpm(settings.bpm);
 function persist() {
   if (TEST_MODE) return false;
-  progress.settings = { level: settings.level, bpm: settings.bpm };
+  progress.settings = { level: settings.level, bpm: settings.bpm, vol: settings.vol };
   return saveProgress(progress);
 }
 // Tay trái theo mức tay (1–4); hợp âm không có nốt 7 giữ nguyên ở mọi mức
@@ -2669,13 +2674,13 @@ if (typeof document !== 'undefined') {
       if (pianoBufs[n]) {
         const s = ac.createBufferSource(), g = ac.createGain();
         s.buffer = pianoBufs[n];
-        g.gain.setValueAtTime(0.35, t0); g.gain.setValueAtTime(0.35, t0 + Math.max(0, dur - 0.08)); g.gain.linearRampToValueAtTime(0, t0 + dur);
+        g.gain.setValueAtTime(0.5, t0); g.gain.setValueAtTime(0.5, t0 + Math.max(0, dur - 0.08)); g.gain.linearRampToValueAtTime(0, t0 + dur);
         s.connect(g).connect(outOf(ac)); s.start(t0); s.stop(t0 + dur + 0.02); oscs.push(s);
         return;
       }
       const o = ac.createOscillator(), g = ac.createGain();
       o.type = 'triangle'; o.frequency.value = 440 * 2 ** ((n - 69) / 12);
-      g.gain.setValueAtTime(0.12, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+      g.gain.setValueAtTime(0.18, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
       o.connect(g).connect(outOf(ac)); o.start(t0); o.stop(t0 + dur); oscs.push(o);
     });
   }
@@ -3268,6 +3273,9 @@ if (typeof document !== 'undefined') {
     TABS[document.querySelector('nav button.act').dataset.t](); drawKb();
   };
   $('level').value = settings.level;
+  $('vol').value = settings.vol;
+  $('vol').oninput = e => { settings.vol = Math.min(3, Math.max(0.4, +e.target.value || 1.6));
+    if (ac && ac.out) ac.out.gain.value = settings.vol; persist(); };
   learn(); drawKb();
   if (!TEST_MODE) loadPiano();
   // Chạy offline: đăng ký service worker; lỗi gì cũng bỏ qua, app vẫn chạy
