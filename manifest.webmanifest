@@ -1,8 +1,12 @@
 {
+  "id": "/phildave/?app=phildave-2",
   "name": "Phildave – Hợp âm màu",
   "short_name": "Phildave",
+  "description": "Học hợp âm màu theo Phildave, tra cứu và tập bấm hợp âm",
   "display": "standalone",
   "start_url": "./",
+  "scope": "./",
+  "orientation": "any",
   "theme_color": "#16181d",
   "background_color": "#16181d",
   "icons": [
@@ -17,6 +21,12 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "icon.svg",

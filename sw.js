@@ -1,5 +1,5 @@
 // Service worker: chạy offline. App → mạng trước (luôn có bản mới khi có mạng); mẫu âm → cache trước.
-const CACHE = 'phildave-v1';
+const CACHE = 'phildave-v2';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

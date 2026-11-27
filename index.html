@@ -4827,7 +4827,7 @@ if (typeof document !== 'undefined') {
     if (!TEST_MODE && shouldRegisterSW(location.protocol)) {
       navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW:', e));
       // Lần mở đầu, mẫu âm tải trước khi SW kịp chạy nên SW chưa lưu: tự lưu mẫu vào cache để lần sau chạy offline
-      navigator.serviceWorker.ready.then(() => caches.open('phildave-v1')).then(c => {
+      navigator.serviceWorker.ready.then(() => caches.open('phildave-v2')).then(c => {
         for (let n = 36; n <= 84; n++) c.match(SAMPLE_URL(n)).then(hit => hit || c.add(SAMPLE_URL(n))).catch(() => {});
       }).catch(() => {});
     }
