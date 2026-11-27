@@ -83,6 +83,20 @@
   .hcol > span { position:absolute; bottom:-16px; font-size:11px; color:var(--mut); }
   .hline { position:absolute; left:-4px; right:0; border-top:1px dashed var(--mut); pointer-events:none; }
   .hline span { position:absolute; left:-18px; top:-8px; font-size:11px; color:var(--mut); }
+  .pkroots { display:grid; grid-template-columns:repeat(6, 1fr); gap:4px; margin-top:4px; }
+  .pkroots button.b { margin:0; padding:8px 2px; font-size:13px; }
+  .pkrow { margin-top:6px; } .pkrow > span { display:block; }
+  .pkrow button.b { padding:7px 9px; font-size:14px; }
+  .libkeys { display:grid; grid-template-columns:repeat(6, 1fr); gap:4px; margin-top:6px; }
+  .libkeys button.b { margin:0; padding:8px 2px; }
+  #libshape { display:block; width:100%; margin-top:6px; padding:9px; font-size:15px; border-radius:8px; border:1px solid #3a3f4b; background:#111318; color:var(--tx); }
+  .libchips button.b { padding:7px 9px; font-size:14px; }
+  .libname { font-size:22px; font-weight:800; }
+  .libtypes { display:flex; flex-wrap:wrap; gap:2px 6px; margin-top:4px; }
+  .libtypes label { display:inline-flex; align-items:center; gap:5px; padding:6px 8px; background:#2f3440; border-radius:8px; font-size:14px; }
+  .libtypes input { width:auto; margin:0; padding:0; }
+  #lhaway { position:sticky; left:4px; display:inline-block; transform:none; cursor:pointer; z-index:3; }
+  #practice.lib #show, #practice.lib #checkTap, #practice.lib #clearTap { display:none; }   /* Thư viện lúc tra cứu chỉ xem thế bấm; lúc tập thì bỏ class lib để chạm + Kiểm tra */
 </style>
 </head>
 <body>
@@ -91,6 +105,7 @@
   <button data-t="learn" class="act">Học</button>
   <button data-t="quiz">Đố</button>
   <button data-t="reharm">Tái hoà âm</button>
+  <button data-t="library">Thư viện</button>
 </nav>
 <main id="main"></main>
 <section id="practice">
@@ -278,6 +293,11 @@ const TYPES = {
   add2:  { suf:'2',           lh:[0],    rh:[2,4,7] },      // C2 = nốt C + nốt D E G
   aug:   { suf:'+',           lh:[0],    rh:[0,4,8] },      // C+ = nốt C + hợp âm C+
   sus4:  { suf:'(sus4)',      lh:[0],    rh:[0,5,7] },      // G(sus4) = nốt G + nốt G C D
+  // Thư viện hợp âm: loại thêm cho tra cứu / tập bấm (bài học không dùng)
+  sus2:  { suf:'sus2',        lh:[0],    rh:[0,2,7] },      // Csus2 = C D G
+  six:   { suf:'6',           lh:[0],    rh:[4,7,9] },      // C6 = nốt C + E G A (bấm chuẩn: tay phải C E G A)
+  dom7sus4:{ suf:'7sus4',     lh:[0,10], rh:[0,5,7] },      // C7sus4 = C Bb + C F G
+  dom7s11:{ suf:'7(#11)',     lh:[0,10], rh:[4,6,10] },     // C7(#11) bản thường (không 9, 13) = C Bb + E F# Bb; khác lyd (13(#11))
 };
 // Hậu tố viết khác của cùng một loại (tên hiện giữ đúng như gõ)
 const ALIASES = { '7(9)':'dom9', '7(13)':'dom13', '7(b13 #9)':'alt1', '7(#11)':'lyd', '7(9 #11 13)':'lyd', '7+':'dom7b13', '7(#5)':'dom7b13',
@@ -306,16 +326,18 @@ function parseChord(s) {
 }
 
 // Đọc ký hiệu đầy đủ: gốc dài nhất khớp PC + đúng một hậu tố trong TYPES
-function parseSymbol(s) {
+// opts.lib: đọc "7(#11)" thành loại thường dom7s11 (thư viện); mặc định "7(#11)" vẫn là lyd như bài học và Tái hoà âm
+function parseSymbol(s, opts) {
+  const lib = !!(opts && opts.lib);
   s = String(s).trim().replace('°7', 'dim7');
   const sl = s.lastIndexOf('/');
   if (sl >= 0 && Object.prototype.hasOwnProperty.call(PC, s.slice(sl + 1))) {   // chỉ tách bass khi phần sau là tên nốt (C6/9 không phải bass 9)
-    const c = parseSymbol(s.slice(0, sl)), b = s.slice(sl + 1);
+    const c = parseSymbol(s.slice(0, sl), opts), b = s.slice(sl + 1);
     return c && !c.bass ? chord(c.root, c.type, PC[b], { rootName: c.rootName, bassName: b, suf: c.suf }) : null;
   }
   const root = Object.keys(PC).filter(k => s.startsWith(k)).sort((a, b) => b.length - a.length)[0];
   if (root === undefined) return null;
-  const rest = s.slice(root.length), t = Object.keys(TYPES).find(k => TYPES[k].suf === rest), al = Object.prototype.hasOwnProperty.call(ALIASES, rest) ? ALIASES[rest] : undefined;
+  const rest = s.slice(root.length), t = Object.keys(TYPES).find(k => TYPES[k].suf === rest && (lib || k !== 'dom7s11')), al = Object.prototype.hasOwnProperty.call(ALIASES, rest) ? ALIASES[rest] : undefined;
   return t !== undefined ? chord(PC[root], t, null, { rootName: root }) : al !== undefined ? chord(PC[root], al, null, { rootName: root, suf: rest }) : null;
 }
 
@@ -429,7 +451,7 @@ function loadLessons(text) {
   return { lessons, errors };
 }
 
-const settings = { level: 3, bpm: 72, vol: 1.6 };
+const settings = { level: 3, bpm: 72, vol: 1.6, libStyle: 'std', libHand: 'R' };   // libStyle/libHand: kiểu bấm và tay (ba nốt) ở tab Thư viện
 // Nhịp hợp lệ 50–120; giá trị không hợp lệ → 72
 function clampBpm(x) { return typeof x === 'number' && Number.isFinite(x) ? Math.min(120, Math.max(50, x)) : 72; }
 
@@ -537,6 +559,24 @@ function distinctCount(kind, keys, upTo) {
   for (let a = 0; a < 400; a++) { const kn = keys === 'C' ? 'C' : SKILL_KEYS[Math.floor(rng() * SKILL_KEYS.length) % SKILL_KEYS.length], q = skillQuestion(kind, skillKey(kn), upTo, rng); if (q) seen.add(q.key); }
   return distinctCache[id] = seen.size;
 }
+// ---------- Thư viện: lượt tập tính điểm (20 câu), lịch sử 10 lần theo khoá (nhóm, kiểu bấm, mốc giờ, mức tay) ----------
+const LIB_ROUND = 20, LIB_HIST_CAP = 10;
+// khoá lịch sử: nhóm (k0..k11 = giọng, s1..s13 = hình tay) | kiểu bấm | mốc giờ | mức tay
+const libKey = (grp, style, timer, level) => `${grp.kind === 'key' ? 'k' + grp.key : 's' + grp.id}|${style}|${timer}|${level}`;
+// > 0 nếu a tốt hơn b: điểm cao hơn thắng, bằng điểm thì thời gian trung bình ít hơn thắng
+const cmpLib = (a, b) => a.score !== b.score ? Math.sign(a.score - b.score) : a.avgMs !== b.avgMs ? Math.sign(b.avgMs - a.avgMs) : 0;
+// So lần làm att với các lần trước (list chưa chứa att): lần trước, tốt nhất trước đó, có phải tốt nhất mới
+function compareLib(list, att) {
+  const prev = list.length ? list[list.length - 1] : null, best = list.reduce((b, a) => !b || cmpLib(a, b) > 0 ? a : b, null);
+  return { prev, best, vsPrev: prev ? cmpLib(att, prev) : null, isRecord: !best || cmpLib(att, best) > 0 };
+}
+function sanitizeLib(raw) {
+  const out = { history: {} }; if (!isObj(raw) || !isObj(raw.history)) return out;
+  const valid = a => isObj(a) && Number.isInteger(a.score) && a.score >= 0 && a.score <= LIB_ROUND && a.total === LIB_ROUND && Number.isFinite(a.avgMs) && a.avgMs >= 0 && Number.isFinite(a.at);
+  for (const [k, v] of Object.entries(raw.history)) if (Array.isArray(v) && k.length < 40 && !['__proto__', 'constructor', 'prototype'].includes(k)) {
+    const l = v.filter(valid).map(a => ({ score: a.score, total: a.total, avgMs: a.avgMs, at: a.at })).slice(-LIB_HIST_CAP); if (l.length) out.history[k] = l; }
+  return out;
+}
 const fmtSec = ms => (Math.round(ms / 100) / 10).toString().replace('.', ',') + ' giây';
 const fmtDur = ms => ms >= 60000 ? `${Math.floor(ms / 60000)} phút ${String(Math.floor(ms % 60000 / 1000)).padStart(2, '0')} giây` : fmtSec(ms);
 
@@ -548,7 +588,7 @@ const TEST_MODE = typeof location !== 'undefined' && /[?&]test/.test(location.se
 const shouldRegisterSW = protocol => protocol === 'http:' || protocol === 'https:';
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 function loadProgress(storage) {
-  const p = { done: {}, wrong: {}, recent: {}, history: {}, quiz: { play: 'free', mode: null, keys: 'C', timer: 'mid' }, settings: { level: 3, bpm: 72 } };   // recent: bài → key các câu của lần làm quiz trước
+  const p = { done: {}, wrong: {}, recent: {}, history: {}, quiz: { play: 'free', mode: null, keys: 'C', timer: 'mid' }, lib: { history: {} }, settings: { level: 3, bpm: 72, libStyle: 'std', libHand: 'R' } };   // recent: bài → key các câu của lần làm quiz trước
   try {
     if (storage === undefined) storage = globalThis.localStorage;
     const raw = JSON.parse(storage.getItem(STORE_KEY));
@@ -556,6 +596,7 @@ function loadProgress(storage) {
     if (isObj(raw.done)) p.done = raw.done;
     if (isObj(raw.wrong)) p.wrong = raw.wrong;
     p.history = sanitizeHistory(raw.history);
+    p.lib = sanitizeLib(raw.lib);   // dữ liệu cũ không có lib → lịch sử rỗng
     if (isObj(raw.quiz)) { const q = raw.quiz;   // lựa chọn ở tab Đố: chế độ, dạng câu, giọng, mốc giờ
       if (q.play === 'free' || q.play === 'run') p.quiz.play = q.play;
       if (typeof q.mode === 'string' && q.mode.length < 40) p.quiz.mode = q.mode;
@@ -568,6 +609,9 @@ function loadProgress(storage) {
       if (typeof bpm === 'number' && Number.isFinite(bpm)) p.settings.bpm = bpm;
       const { vol } = raw.settings;
       if (typeof vol === 'number' && Number.isFinite(vol)) p.settings.vol = Math.min(3, Math.max(0.4, vol));
+      const { libStyle, libHand } = raw.settings;
+      if (libStyle === 'std' || libStyle === 'phil') p.settings.libStyle = libStyle;
+      if (libHand === 'R' || libHand === 'L') p.settings.libHand = libHand;
     }
   } catch (e) { /* bộ nhớ chặn hoặc dữ liệu hỏng → dùng mặc định */ }
   return p;
@@ -584,15 +628,16 @@ Object.assign(settings, progress.settings);
 settings.bpm = clampBpm(settings.bpm);
 function persist() {
   if (TEST_MODE) return false;
-  progress.settings = { level: settings.level, bpm: settings.bpm, vol: settings.vol };
+  progress.settings = { level: settings.level, bpm: settings.bpm, vol: settings.vol, libStyle: settings.libStyle, libHand: settings.libHand };
   return saveProgress(progress);
 }
 // Tay trái theo mức tay (1–4); hợp âm không có nốt 7 giữ nguyên ở mọi mức
-const NO7 = ['maj', 'min', 'sus9', 'sus4b9', 'm11', 'dim7', 'mM7', 'm6', 'add2', 'aug', 'sus4', 'm7b5', 'dim', 'six9'], MINISH = ['min', 'm7', 'm9', 'm11', 'm7b5', 'mM7', 'm6'];
+const NO7 = ['maj', 'min', 'sus9', 'sus4b9', 'm11', 'dim7', 'mM7', 'm6', 'add2', 'aug', 'sus4', 'm7b5', 'dim', 'six9', 'sus2', 'six'], MINISH = ['min', 'm7', 'm9', 'm11', 'm7b5', 'mM7', 'm6'];
 function lhFor(c, level) {
   const t = TYPES[c.type];
   if (NO7.includes(c.type)) return t.lh;
   if (level <= 1) return [0];
+  if (c.type === 'dom7sus4') return t.lh;   // không có bậc 3: mức 4 vẫn gốc + b7
   if (level >= 4) return [0, MINISH.includes(c.type) ? 3 : 4, ['maj7', 'maj9', 'maj13s11'].includes(c.type) ? 11 : 10];
   return t.lh;
 }
@@ -619,10 +664,221 @@ const augOverThird = c => c.type === 'aug' && c.bass === (c.root + 4) % 12;
 const augRH = (c, r0) => [r0, r0 + 8, r0 + 12];   // r0 = nốt gốc thấp của tay phải
 function voicing(c) {
   if (c.v) return c.v;      // cách bấm đã chọn theo hợp âm đứng trước (voiceSeq)
+  return voicingAt(c, settings.level);
+}
+// Thế bấm của app ở một mức tay cố định (voicing dùng mức tay đang chọn)
+function voicingAt(c, level) {
   const t = TYPES[c.type];           // tay trái quanh C2–B2
-  const lh = lhNotes(c, lhFor(c, settings.level));
+  const lh = lhNotes(c, lhFor(c, level));
   const rh = augOverThird(c) ? augRH(c, 60 + c.root) : rhOffs(c, t.rh).map(o => 60 + (c.root + o) % 12).sort((a,b) => a-b); // tay phải quanh C4–B4
   return { lh, rh };
+}
+
+// ---------- Thư viện hợp âm: thế bấm chuẩn, hình tay, nhóm theo giọng, chấm ----------
+// Thứ tự loại trong lưới chọn (spec "Danh sách loại hợp âm")
+const LIB_TYPES = [
+  { group: 'tri', types: ['maj', 'min', 'dim', 'aug', 'sus2', 'sus4'] },
+  { group: 'four', types: ['six', 'm6', 'dom7', 'maj7', 'm7', 'm7b5', 'dim7', 'mM7', 'dom7sus4'] },
+  { group: 'colour', types: ['add2', 'dom9', 'maj9', 'm9', 'm11', 'dom13', 'six9', 'domb9', 's9', 'dom7s11', 'dom7b13', 'alt1', 'alt2', 'lyd', 'maj13s11', 'sus9'] },
+];
+// Bấm chuẩn: khoảng cách các nốt tay phải tính từ gốc (thế gốc, đi lên).
+// Ba nốt và bốn nốt: đủ nốt, gốc ở dưới. Hợp âm màu: tay trái đã có gốc nên tay phải bỏ gốc; còn quá 4 nốt thì bỏ nốt 5;
+// 7(b13) = 7+ = 3, b7, b13 (không có nốt 5); 13 = 3, 7, 9, 13; 11 (m11) = b3, b7, 9, 11; 13(#11) = 3, 7, #11, 13
+const STD_RH = {
+  maj: [0, 4, 7], min: [0, 3, 7], dim: [0, 3, 6], aug: [0, 4, 8], sus2: [0, 2, 7], sus4: [0, 5, 7],
+  six: [0, 4, 7, 9], m6: [0, 3, 7, 9], dom7: [0, 4, 7, 10], maj7: [0, 4, 7, 11], m7: [0, 3, 7, 10], m7b5: [0, 3, 6, 10],
+  dim7: [0, 3, 6, 9], mM7: [0, 3, 7, 11], dom7sus4: [0, 5, 7, 10], add2: [0, 2, 4, 7],
+  dom9: [4, 7, 10, 14], maj9: [4, 7, 11, 14], m9: [3, 7, 10, 14], m11: [3, 10, 14, 17], dom13: [4, 10, 14, 21], six9: [4, 7, 9, 14],
+  domb9: [4, 7, 10, 13], s9: [4, 7, 10, 15], dom7s11: [4, 7, 10, 18], dom7b13: [4, 10, 20], alt1: [4, 10, 15, 20], alt2: [4, 10, 13, 20],
+  hyb: [4, 10, 13, 21], lyd: [4, 10, 18, 21], maj13s11: [4, 11, 18, 21], sus9: [5, 7, 10, 14], sus4b9: [5, 7, 10, 13],
+};
+const LIB_TRI = ['maj', 'min', 'dim', 'aug', 'sus2', 'sus4'];
+// Thế bấm chuẩn (số MIDI). Ba nốt: một tay (phải từ 60, trái từ 48), inv xoay nốt thấp nhất lên quãng tám.
+// Từ 4 nốt: tay trái gốc ở 36–47, tay phải từ 60. Bass riêng X/Y: tay trái Y, tay phải thế chuẩn của X (bỏ Y nếu là nốt thấp nhất).
+function stdVoicing(c, { hand = 'R', inv = 0 } = {}) {
+  const offs = STD_RH[c.type] || [...new Set([...TYPES[c.type].lh, ...TYPES[c.type].rh])].sort((a, b) => a - b);
+  if (c.bass != null) {   // tay trái chỉ còn Y: hợp âm màu (đã bỏ gốc) phải lấy lại gốc ở tay phải; bỏ nốt trùng Y; quá 4 nốt thì bỏ nốt 5
+    let o = offs.includes(0) ? offs.filter((x, i) => i > 0 || (c.root + x) % 12 !== c.bass) : [0, ...offs].filter(x => (c.root + x) % 12 !== c.bass);
+    if (o.length > 4) o = o.filter(x => x !== 7);
+    if (o.length > 4) o = o.filter(x => x !== 14);   // không có nốt 5 để bỏ (Cm11/G): bỏ nốt 9
+    // tay phải rộng hơn quãng 9 (C13/E = C Bb D A): hạ các nốt trên quãng 8 xuống một quãng 8 cho vừa một tay (C D A Bb)
+    if (o[o.length - 1] - o[0] > 14) o = [...new Set(o.map(x => x > 12 ? x - 12 : x))].sort((a, b) => a - b);
+    const rh = o.map(x => 60 + c.root + x), down = rh[0] >= 72 ? 12 : 0;
+    return { lh: [36 + c.bass], rh: rh.map(n => n - down) };
+  }
+  if (LIB_TRI.includes(c.type)) {
+    const ns = offs.map(o => (hand === 'L' ? 48 : 60) + c.root + o);
+    for (let k = 0; k < (inv % 3); k++) ns.push(ns.shift() + 12);
+    return hand === 'L' ? { lh: ns, rh: [] } : { lh: [], rh: ns };
+  }
+  const rh = offs.map(o => 60 + c.root + o), down = rh[0] >= 72 ? 12 : 0;   // hợp âm màu gốc cao (B13): nốt thấp nhất tay phải giữ trong 60–71
+  return { lh: [36 + c.root], rh: rh.map(n => n - down) };
+}
+// Tay trái chỉ 3 – 7 (không gốc): khoảng cách bậc 3 và bậc 7 của hợp âm
+const third7 = c => [MINORISH.includes(c.type) || c.type === 'm7b5' || c.type === 'dim7' ? 3 : 4, ['maj7', 'maj9', 'maj13s11', 'mM7'].includes(c.type) ? 11 : c.type === 'dim7' ? 9 : 10];
+// 13 hình tay (spec "Danh sách hình tay"): 1–5 bấm chuẩn, 6–13 kiểu Phildave ở mức tay cố định (mức 3)
+const SHAPES = [
+  { id: 1, name: 'Ba nốt thế gốc (một tay)', std: true, types: LIB_TRI, voice: c => stdVoicing(c) },
+  { id: 2, name: 'Ba nốt đảo 1 (một tay)', std: true, types: LIB_TRI, voice: c => stdVoicing(c, { inv: 1 }) },
+  { id: 3, name: 'Ba nốt đảo 2 (một tay)', std: true, types: LIB_TRI, voice: c => stdVoicing(c, { inv: 2 }) },
+  { id: 4, name: 'Bốn nốt: tay trái gốc, tay phải đủ 4 nốt thế gốc', std: true, types: ['six', 'm6', 'dom7', 'maj7', 'm7', 'm7b5', 'dim7'], voice: c => stdVoicing(c) },
+  { id: 5, name: 'Hợp âm màu bấm chuẩn: tay trái gốc, tay phải 4 nốt', std: true, types: ['dom9', 'maj9', 'm9', 'dom13', 'domb9', 's9'], voice: c => stdVoicing(c) },
+  { id: 6, name: 'Tay trái gốc + 7, tay phải hợp âm ba nốt từ gốc', std: false, types: ['dom7', 'maj7', 'm7'], voice: c => voicingAt(c, 3) },
+  { id: 7, name: 'Tay phải hợp âm ba nốt trên nốt 5', std: false, types: ['maj9', 'm9'], voice: c => voicingAt(c, 3) },
+  { id: 8, name: 'Tay phải hợp âm trưởng trên nốt 9', std: false, types: ['lyd', 'maj13s11'], voice: c => voicingAt(c, 3) },
+  { id: 9, name: 'Tay phải hợp âm trên nốt b7', std: false, types: ['sus9', 'm11'], voice: c => voicingAt(c, 3) },
+  { id: 10, name: 'Tay phải hợp âm thứ trên bậc b3', std: false, types: ['m7b5'], voice: c => voicingAt(c, 3) },
+  { id: 11, name: 'Hợp âm ba nốt đặt trên hợp âm 7', std: false, types: ['alt1', 'alt2', 'hyb', 'lyd'], voice: c => voicingAt(c, 3) },
+  { id: 12, name: 'Tay trái chỉ 3 – 7, không gốc', std: false, types: ['dom7'], voice: c => ({ lh: third7(c).map(o => 36 + c.root + o), rh: voicingAt(c, 3).rh }) },
+  // bass: [loại, khoảng cách bass so với gốc] — G/B, C/E, D/F# (trưởng trên bậc 3), F/G (trưởng trên 9), Fm/G (thứ trên 9), Am/G (thứ trên b7)
+  // nhóm 13 dựng từ `bass`, không từ `types` (dùng shapeChords)
+  { id: 13, name: 'Hợp âm có bass riêng', std: false, types: ['maj', 'min'], bass: [['maj', 4], ['maj', 2], ['min', 2], ['min', 10]], voice: c => voicingAt(c, 3) },
+];
+// Các hợp âm của một hình ở 12 gốc (hình có `bass` thì dựng X/Y theo khoảng cách bass)
+const shapeChords = sh => Array.from({ length: 12 }, (_, r) => sh.bass ? sh.bass.map(([t, iv]) => chord(r, t, r + iv)) : sh.types.map(t => chord(r, t))).flat();
+// Hợp âm màu / mượn Phildave dùng trong giọng C: [khoảng cách so với chủ, loại, hậu tố viết]
+const LIB_BORROW = [[5, 'm6'], [8, 'maj7'], [10, 'dom7'], [10, 'lyd', '7(#11)'], [1, 'lyd', '7(#11)'], [3, 'maj7'], [10, 'maj7'], [5, 'm7']];
+// Hợp âm của giọng trưởng key (0..11), gồm giọng thứ cùng hoá biểu; tên gốc theo cách viết của giọng (keyTab)
+function keyGroup(key) {
+  const k = ((key % 12) + 12) % 12, tab = keyTab(k, []), ton = { root: k, rootName: keyName(k) }, out = [], seen = new Set();
+  const add = (iv, ty, suf) => { const r = (k + iv) % 12, c = chord(r, ty, null, { rootName: relName(ton, r, tab), ...(suf ? { suf } : {}) });
+    const id = c.name + '.' + ty; if (!seen.has(id)) { seen.add(id); out.push(c); } };
+  const TRI3 = ['maj', 'min', 'min', 'maj', 'maj', 'min', 'dim'];
+  DEG.maj.forEach((iv, d) => add(iv, TRI3[d]));
+  DEG.maj.forEach((iv, d) => add(iv, SEV.maj[d]));
+  [9, 11, 0, 2, 4].forEach(iv => add(iv, 'dom7'));                              // "mẹ" phụ: V/II, V/III, V/IV, V/V, V/VI
+  LIB_BORROW.forEach(([iv, ty, suf]) => add(iv, ty, suf));
+  DEG.min.forEach((iv, d) => add((iv + 9) % 12, ['min', 'dim', 'maj', 'min', 'maj', 'maj', 'maj'][d]));   // giọng thứ cùng hoá biểu (bậc V trưởng từ thứ hoà âm)
+  DEG.min.forEach((iv, d) => add((iv + 9) % 12, SEV.min[d]));
+  return out;
+}
+// Chấm theo đúng thế bấm: bộ nốt (mod 12) bằng đúng bộ nốt đáp án, nốt thấp nhất đúng nốt thấp nhất của đáp án (mod 12)
+function libGrade(notes, ans) {
+  const all = [...ans.lh, ...ans.rh];
+  if (!notes || !notes.length || !all.length) return false;
+  const a = new Set(notes.map(n => ((n % 12) + 12) % 12)), b = new Set(all.map(n => n % 12));
+  if (!(a.size === b.size && [...a].every(x => b.has(x)) && Math.min(...notes) % 12 === Math.min(...all) % 12)) return false;
+  // thế hai tay: số phím bấm phải bằng số nốt của thế (E7 bấm chuẩn E | E G# B D cần cả hai nốt E); thế một tay giữ luật cũ
+  return !(ans.lh.length && ans.rh.length) || new Set(notes).size === new Set(all).size;
+}
+// ---- Tra cứu thư viện (Task 2): tên, nhãn, các nốt, thế bấm theo kiểu, mẹo ----
+// Nút gốc của bộ chọn hợp âm; gốc phím đen viết giáng (Db, Eb, Ab, Bb), F# viết thăng; hợp âm thứ/giảm trên C#, G# viết thăng (C#m, G#m)
+const PICK_ROOTS = ['C', 'C#/Db', 'D', 'D#/Eb', 'E', 'F', 'F#/Gb', 'G', 'G#/Ab', 'A', 'A#/Bb', 'B'];
+const LIB_GROUP_LABEL = { tri: 'Ba nốt', four: 'Bốn nốt', colour: 'Màu' };
+const libRootName = (r, t) => { r = ((r % 12) + 12) % 12;
+  return SHARP_NAMES[r] === FLAT_NAMES[r] ? NAMES[r] : r === 6 ? 'F#' : [1, 8].includes(r) && [...MINORISH, 'dim', 'dim7'].includes(t) ? SHARP_NAMES[r] : FLAT_NAMES[r]; };
+const libChord = (r, t, bass) => chord(r, t, bass, { rootName: libRootName(r, t) });
+// Nhãn hiện: hai loại cùng viết "7(#11)" phải khác nhau (bản thường dom7s11 / thế của thầy lyd = tay trái X7 + hợp âm trưởng trên nốt 9)
+const libLabel = c => c.type === 'dom7s11' ? c.name + ' cơ bản' : c.type === 'lyd' && c.suf === '7(#11)' ? c.name + ' kiểu thầy' : c.name;
+// Thế "7(#11) kiểu thầy" của cùng gốc (như bài học viết Bb7(#11))
+const lydOf = c => chord(c.root, 'lyd', c.bass, { rootName: c.rootName ?? nm(c.root), suf: '7(#11)', ...(c.bassName ? { bassName: c.bassName } : {}) });
+// Các nốt của hợp âm (theo bậc: gốc, 3, 5, 7, rồi nốt màu), mỗi nốt kèm bậc
+const DEG_ORDER = ['gốc', '2', 'b3', '3', '4', 'b5', '5', '#5', '6', 'bb7', 'b7', '7', 'b9', '9', '#9', '11', '#11', 'b13', '13'];
+function libNotes(c) {
+  const offs = [0, ...(STD_RH[c.type] || []), ...TYPES[c.type].lh, ...TYPES[c.type].rh], seen = new Set(), out = [];
+  for (const o of offs) { const n = 60 + c.root + o, pc = n % 12; if (seen.has(pc)) continue; seen.add(pc); out.push({ n, name: spell(c, n), deg: degree(c, n) }); }
+  return out.sort((a, b) => DEG_ORDER.indexOf(a.deg) - DEG_ORDER.indexOf(b.deg));
+}
+// Thế bấm hiện ở thư viện: hình tay (nhóm "theo hình tay", kiểu Phildave) > Bấm chuẩn (tay, thế đảo) > Kiểu Phildave (mức tay đang chọn)
+const libVoice = (c, style, { hand = 'R', inv = 0, shape = null } = {}) => shape ? shape.voice(c) : style === 'std' ? stdVoicing(c, { hand, inv }) : voicingAt(c, settings.level);
+const libIsTri = c => LIB_TRI.includes(c.type) && c.bass == null;
+// ---- Tập bấm (Task 3) ----
+// Hợp âm của nhóm tập: group = { kind:'key', key } (giọng) hoặc { kind:'shape', id } (hình tay); lọc theo loại và "chỉ gốc phím trắng"
+const WHITE_PCS = [0, 2, 4, 5, 7, 9, 11];
+const libGroupChords = group => group.kind === 'key' ? keyGroup(group.key) : shapeChords(SHAPES[group.id - 1]).map(c => libChord(c.root, c.type, c.bass));
+function libPool(group, { types = null, white = false } = {}) {
+  return libGroupChords(group).filter(c => (!types || types.includes(c.type)) && (!white || WHITE_PCS.includes(c.root)));
+}
+// hợp âm nhận diện bằng loại + gốc (+ bass), không đọc lại từ tên
+const libId = c => `${c.type}.${c.root}.${c.bass ?? ''}`;
+// n câu ngẫu nhiên, không lặp hợp âm liền nhau; kho nhỏ hơn n thì lặp lại cả kho (xáo lại mỗi vòng)
+function libOrder(pool, n = LIB_ROUND, rng = Math.random) {
+  const out = [], mix = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)) % (i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  while (pool.length && out.length < n) { const b = mix(pool);
+    if (out.length && b.length > 1 && libId(b[0]) === libId(out[out.length - 1])) [b[0], b[b.length - 1]] = [b[b.length - 1], b[0]];
+    out.push(...b); }
+  return out.slice(0, n);
+}
+// Lời báo khi bấm chưa đúng thế đáp án ans: thiếu / thừa nốt, nốt thấp nhất sai
+function libMiss(notes, c, ans) {
+  const all = [...ans.lh, ...ans.rh], pc = n => ((n % 12) + 12) % 12, want = new Set(all.map(pc)), got = new Set(notes.map(pc));
+  const name = p => { const n = all.find(x => pc(x) === p); return n != null ? spell(c, n) : nm(p); };
+  const miss = [...want].filter(p => !got.has(p)).map(name), extra = [...got].filter(p => !want.has(p)).map(name), low = Math.min(...all);
+  const parts = [miss.length ? 'thiếu ' + miss.join(' ') : '', extra.length ? 'thừa ' + extra.join(' ') : '', notes.length && pc(Math.min(...notes)) !== pc(low) ? `nốt thấp nhất phải là ${spell(c, low)}` : ''].filter(Boolean);
+  const n = new Set(all).size, k = new Set(notes).size;
+  if (!parts.length && ans.lh.length && ans.rh.length && k !== n)
+    return k < n ? `Chưa đúng: cần bấm cả tay trái (${ans.lh.map(x => spell(c, x)).join(' ')}) — thế này có ${n} nốt.` : `Chưa đúng: thế này chỉ có ${n} nốt, bạn đang bấm ${k} nốt.`;
+  return 'Chưa đúng' + (parts.length ? ': ' + parts.join('; ') : '') + '.';
+}
+// Thế đáp án khi tập: hình 6–13 luôn đúng thế của hình (không theo mức tay); hình 1–5 và nhóm giọng theo kiểu đang chọn
+const libFixedShape = group => group.kind === 'shape' && !SHAPES[group.id - 1].std;
+function libAnswer(c, group, style) {
+  const sh = group.kind === 'shape' ? SHAPES[group.id - 1] : null;
+  if (sh && !sh.std) return sh.voice(c);
+  if (style === 'std') return stdVoicing(c, { hand: settings.libHand, inv: sh && sh.id === 2 ? 1 : sh && sh.id === 3 ? 2 : 0 });
+  return voicingAt(c, settings.level);
+}
+// Mẹo phím ≤ 2 câu (thiết kế §9: mẹo trên phím, không đếm nửa cung)
+function libTip(c, style, v, { inv = 0, shape = null } = {}) {
+  const X = c.rootName ?? nm(c.root), tab = /#/.test(X) ? SHARP_NAMES : FLAT_NAMES;
+  const S = o => spW(c, 60 + c.root + o, tab);   // cùng cách viết với dòng "Các nốt" và bàn phím (không dấu kép)
+  const Sm = (t, o) => spW(chord(c.root, t, null, { rootName: X }), 60 + c.root + o, tab);
+  const hands = ns => ns.map(n => spW(c, n, tab)).join(' ');
+  const rhs = hands(v.rh), n9 = spW(chord(c.root, 'dom9', null, { rootName: X }), 60 + c.root + 14, tab);
+  if (shape) return `Hình tay ${shape.id}: ${shape.name.charAt(0).toLowerCase() + shape.name.slice(1)}. Tay trái ${hands(v.lh)}, tay phải ${rhs}.`;
+  if (style === 'phil') {
+    const hn = shape ? {} : handNames(c), lhN = hn.lh || hands(v.lh), rhN = v.rh.length === 3 && hn.rh ? `hợp âm ${hn.rh}` : rhs;
+    const first = `Kiểu thầy (Mức tay ${settings.level}): tay trái ${lhN}, tay phải ${rhN}.`;
+    const same = t => { const a = voicingAt(c, settings.level), b = voicingAt(chord(c.root, t, c.bass), settings.level); return a.lh.join() === b.lh.join() && a.rh.join() === b.rh.join(); };
+    if (c.type === 'm11' && same('sus9')) return first + ` Thầy bấm m11 giống 9sus4: ${X}m11 và ${X}9sus4 cùng một thế bấm.`;
+    if (c.type === 'sus9' && same('m11')) return first + ` Thầy bấm 9sus4 giống m11: ${X}9sus4 và ${X}m11 cùng một thế bấm.`;
+    if (c.type === 'dom7' && c.bass == null) return first + ` Khi có người chơi bass, tay trái chỉ cần nốt định hướng ${S(4)} – ${S(10)} (bậc 3 và bậc 7), không cần gốc.`;
+    if (c.type === 'lyd') return first + (c.suf === '7(#11)' ? ` Sách ghi tên này nhưng tay phải là hợp âm trưởng trên nốt 9 (${n9}), nên có thêm 9 và 13.` : ` Thầy cũng viết là ${X}7(#11) (7(#11) kiểu thầy).`);
+    if (c.type === 'dom7s11') return first + ` Đây là 7(#11) cơ bản; ${X}7(#11) trong bài của thầy là thế khác: tay phải hợp âm ${n9}.`;
+    const sh = SHAPES.find(s => !s.std && !s.bass && s.types.includes(c.type));
+    return sh ? first + ` Hình tay: ${sh.name.charAt(0).toLowerCase() + sh.name.slice(1)}.` : first;
+  }
+  if (c.bass != null) { const base = chord(c.root, c.type, null, { rootName: X, ...(c.suf != null ? { suf: c.suf } : {}) }).name;
+    return `${c.name} là hợp âm có bass riêng: tay trái bấm ${c.bassName ?? nm(c.bass)} thay cho nốt gốc, tay phải bấm ${base} (${rhs}).`; }
+  if (libIsTri(c) && inv % 3) { const o = STD_RH[c.type];
+    return inv % 3 === 1 ? `Đảo 1: lấy thế gốc rồi đưa ${X} lên trên cùng, nốt thấp nhất là ${S(o[1])}. Vẫn đủ ba nốt nên vẫn là ${c.name}.`
+      : `Đảo 2: đưa thêm ${S(o[1])} lên trên cùng, nốt thấp nhất là ${S(o[2])}. Vẫn đủ ba nốt nên vẫn là ${c.name}.`; }
+  const T = {
+    maj: () => { const mn = libChord(c.root, 'min'), mt = /#/.test(mn.rootName) ? SHARP_NAMES : FLAT_NAMES;
+      return `${X} trưởng gồm nốt gốc ${X}, bậc 3 ${S(4)} và bậc 5 ${S(7)}. Hạ ${S(4)} xuống phím sát bên trái (${spW(mn, 60 + c.root + 3, mt)}) là ra ${mn.name}.`; },
+    min: () => `${X}m là ${X} trưởng có nốt giữa hạ xuống phím sát bên trái: ${Sm('maj', 4)} thành ${S(3)}.`,
+    dim: () => `${X}dim là ${X}m có nốt 5 hạ xuống phím sát bên trái: ${Sm('min', 7)} thành ${S(6)}.`,
+    aug: () => `${X}+ là ${X} trưởng có nốt 5 nâng lên phím sát bên phải: ${Sm('maj', 7)} thành ${S(8)}.`,
+    sus2: () => `${X}sus2 thay bậc 3 (${Sm('maj', 4)}) của ${X} trưởng bằng nốt 2 (${S(2)}), tức ${X} lên một cung. Không có bậc 3 nên nghe không trưởng không thứ, mở và trong.`,
+    sus4: () => `Hợp âm treo ${c.name} thay bậc 3 (${Sm('maj', 4)}) bằng bậc 4 (${S(5)}), nghe lơ lửng. Đưa ${S(5)} xuống ${Sm('maj', 4)} là giải quyết về ${X}.`,
+    six: () => `${X}6 là ${X} trưởng thêm nốt 6 (${S(9)}), tức nốt 5 (${S(7)}) lên một cung.`,
+    m6: () => `${X}m6 là hợp âm thứ thêm 6: ${X}m thêm nốt 6 (${S(9)}), tức nốt 5 (${S(7)}) lên một cung.`,
+    dom7: () => `Hợp âm 7: ${X} trưởng thêm nốt 7 là ${X} lùi một cung (${S(10)}).`,
+    maj7: () => `${X}maj7 là ${X} trưởng thêm nốt 7 là ${X} lùi nửa cung (${S(11)}).`,
+    m7: () => `${X}m7 là ${X}m thêm nốt 7 là ${X} lùi một cung (${S(10)}).`,
+    m7b5: () => `${X}m7b5 là ${X}m7 có nốt 5 hạ xuống phím sát bên trái: ${Sm('m7', 7)} thành ${S(6)}.`,
+    dim7: () => `${X}dim7 là ${X}m7b5 có nốt 7 hạ xuống phím sát bên trái: ${Sm('m7b5', 10)} thành ${S(9)}.`,
+    mM7: () => `${X}m(M7) là hợp âm thứ – 7 trưởng: ${X}m thêm nốt 7 là ${X} lùi nửa cung (${S(11)}).`,
+    dom7sus4: () => `${X}7sus4 là ${X}7 thay bậc 3 (${Sm('dom7', 4)}) bằng bậc 4 (${S(5)}). Nghe lơ lửng, thường đưa ${S(5)} về ${Sm('dom7', 4)} ngay sau đó.`,
+    add2: () => `${X}2 là hợp âm thêm nốt 2: ${X} trưởng thêm ${S(2)}, tức ${X} lên một cung.`,
+    dom9: () => `Nốt 9 là nốt thứ 2 tính từ gốc, đặt cao lên: ${S(14)}. Tay trái đã có ${X} nên tay phải là ${X}7 bỏ gốc, thêm ${S(14)} ở trên.`,
+    maj9: () => `Nốt 9 là nốt thứ 2 tính từ gốc, đặt cao lên: ${S(14)}. Tay trái đã có ${X} nên tay phải là ${X}maj7 bỏ gốc, thêm ${S(14)} ở trên.`,
+    m9: () => `Nốt 9 là nốt thứ 2 tính từ gốc, đặt cao lên: ${S(14)}. Tay trái đã có ${X} nên tay phải là ${X}m7 bỏ gốc, thêm ${S(14)} ở trên.`,
+    m11: () => `${X}m11 là ${X}m7 thêm nốt 9 (${S(14)}) và nốt 11 (${S(17)}), tức nốt thứ 2 và thứ 4 tính từ gốc, đặt cao lên. Tay phải bỏ gốc và nốt 5: ${rhs}.`,
+    dom13: () => `Nốt 13 là nốt thứ 6 tính từ gốc, đặt cao lên: ${S(21)}. Tay phải bấm bậc 3, b7, 9, 13 (${rhs}), bỏ nốt 5.`,
+    six9: () => `${X}6/9 là ${X} trưởng thêm nốt 6 (${S(9)}) và nốt 9 (${S(14)}). Tay trái đã có ${X} nên tay phải bỏ gốc: ${rhs}.`,
+    domb9: () => `b9 là ${X} nhích lên phím sát bên phải, đặt cao lên: ${S(13)}. Tay phải là ${X}7 bỏ gốc, thêm ${S(13)} ở trên.`,
+    s9: () => `#9 là nốt 9 (${n9}) nâng lên phím sát bên phải: ${S(15)}. Tay phải là ${X}7 bỏ gốc, thêm ${S(15)} ở trên.`,
+    dom7s11: () => `7(#11) cơ bản là ${X}7 thêm #11 (${S(18)}), tức nốt thứ 4 tính từ gốc nâng lên phím sát bên phải. Khác ${X}7(#11) kiểu thầy (tay trái ${X}7, tay phải hợp âm ${n9}) có thêm 9 và 13.`,
+    dom7b13: () => `${X}7(b13), còn viết ${X}7+, là ${X}7 thêm b13 (${S(20)}), phím sát bên phải nốt 5 (${S(7)}). Bấm chuẩn bỏ nốt 5: ${rhs}.`,
+    alt1: () => `${X}7(#9 b13) là ${X}7 thêm hai màu biến đổi #9 (${S(15)}) và b13 (${S(20)}). Tay phải bấm bậc 3, b7, #9, b13: ${rhs}.`,
+    alt2: () => `${X}7(b9 b13) là ${X}7 thêm hai màu biến đổi b9 (${S(13)}) và b13 (${S(20)}). Tay phải bấm bậc 3, b7, b9, b13: ${rhs}.`,
+    lyd: () => c.suf === '7(#11)' ? `Thầy viết ${X}7(#11) cho thế này: tay trái ${X}7, tay phải hợp âm trưởng trên nốt 9 (${n9}). Bấm chuẩn tay phải bấm bậc 3, b7, #11, 13: ${rhs}.`
+      : `${X}13(#11) là ${X}7 thêm 9, #11 và 13; bấm chuẩn tay phải bấm bậc 3, b7, #11, 13 (${rhs}). Thầy viết là ${X}7(#11) và bấm tay phải hợp âm ${n9}.`,
+    maj13s11: () => `${X}maj13(#11) là ${X}maj7 thêm #11 (${S(18)}) và 13 (${S(21)}). Tay phải bấm bậc 3, 7, #11, 13: ${rhs}.`,
+    sus9: () => `${X}9sus4 là ${X}7sus4 thêm nốt 9 (${S(14)}). Tay phải bấm bậc 4, 5, b7, 9: ${rhs}.`,
+  };
+  return T[c.type] ? T[c.type]() : `Tay trái bấm ${hands(v.lh)}, tay phải bấm ${rhs}.`;
 }
 // Kiểu bấm thứ 2: tay trái gốc + 3, nốt 7 chuyển lên tay phải (để nốt 7 của hợp âm trước đi xuống thành nốt 3)
 const VARB = {
@@ -748,8 +1004,9 @@ function fifthOf(from, minor = false) { const sc = scale5(from, minor); return s
 // Bậc của một nốt so với gốc hợp âm (để ghi rõ nốt nào là 9, #11, 13...)
 function degree(c, n) {
   const i = ((n - c.root) % 12 + 12) % 12, minor = MINORISH.includes(c.type), dim = c.type === 'dim7' || c.type === 'dim';
-  if ((c.type === 'aug' && i === 8) || (c.type === 'm6' && i === 9) || (c.type === 'six9' && i === 9) || (c.type === 'add2' && i === 2) || (c.type === 'sus4' && i === 5))
-    return { aug:'#5', m6:'6', six9:'6', add2:'2', sus4:'4' }[c.type];
+  if ((c.type === 'aug' && i === 8) || (c.type === 'm6' && i === 9) || (c.type === 'six9' && i === 9) || (c.type === 'add2' && i === 2) || (c.type === 'sus4' && i === 5)
+      || (c.type === 'sus2' && i === 2) || (c.type === 'six' && i === 9) || (c.type === 'dom7sus4' && i === 5))
+    return { aug:'#5', m6:'6', six9:'6', add2:'2', sus4:'4', sus2:'2', six:'6', dom7sus4:'4' }[c.type];
   return ({0:'gốc',1:'b9',2:'9',3: minor || dim ? 'b3' : '#9',4:'3',5:'11',6: c.type === 'm7b5' || dim ? 'b5' : '#11',
            7:'5',8:'b13',9: c.type === 'dim7' ? 'bb7' : '13',10:'b7',11:'7'})[i];
 }
@@ -849,7 +1106,7 @@ function grade(notes, c) {
 
 // Câu đố từ bài học: concept → before → slot → colour → rh → play, cắt ở 5 (luôn còn ≥1 play, ≥1 slot, ≥1 colour nếu có), thiếu thì thêm play cho đủ 3. Câu nào cũng có why.
 // Mục có prog: câu slot ("chỗ ?") thay câu before.
-const DOMF = ['dom7', 'dom9', 'domb9', 'dom13', 'lyd', 'sus9', 'sus4b9', 'dom7b13', 'hyb', 's9'];
+const DOMF = ['dom7', 'dom9', 'domb9', 'dom13', 'lyd', 'sus9', 'sus4b9', 'dom7b13', 'hyb', 's9', 'dom7sus4', 'dom7s11'];
 const COLF = ['dom9', 'domb9', 'dom13', 'lyd', 'alt1', 'alt2'];   // họ dominant có màu (không tính dom7 trơn)
 const COLOURISH = ['dom9', 'domb9', 'lyd', 'sus9', 'sus4b9', 'm9', 'm11', 'dom13', 'maj9', 'maj13s11', 'alt1', 'alt2', 'dim7'];
 const SHARP_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
@@ -1176,6 +1433,7 @@ function skillBank(upTo, rng = Math.random, n = 12, focus = new Set(), avoid = (
 }
 // bài đầu tiên có loại hợp âm ty (tính một lần từ dữ liệu bài): lựa chọn sai không dùng loại chưa có trong bài
 let TYPE_FIRST = null;
+// Lưu ý: chữ bài học có G7sus4/A7sus4 nên TYPE_FIRST có cả loại thư viện dom7sus4; đừng lấy danh sách loại cho câu Đố từ đây
 const typeTaught = (ty, id) => { if (!TYPE_FIRST) { TYPE_FIRST = {};
   for (const l of loadLessons().lessons) promptChords(JSON.stringify(l).replace(/"/g, ' ')).forEach(n => { const t = parseSymbol(n).type; if (!(t in TYPE_FIRST) || lk(l.id) < lk(TYPE_FIRST[t])) TYPE_FIRST[t] = l.id; }); }
   return TYPE_FIRST[ty] != null && lk(TYPE_FIRST[ty]) <= lk(id); };
@@ -1570,8 +1828,9 @@ function insMore(target, ctx, tab, ref) {
 const MAJ = [0,2,4,5,7,9,11], MIN = [0,2,3,5,7,8,9,10], MIXO = [0,2,4,5,7,9,10], ALT = [0,1,3,4,5,7,8,10];
 const SCALE = { maj:MAJ, maj7:MAJ, maj9:MAJ, maj13s11:[0,2,4,6,7,9,11], min:MIN, m7:MIN, m9:MIN, m11:MIN,
   m7b5:[0,1,3,5,6,8,10], dom7:MIXO, dom9:MIXO, dom13:MIXO, sus9:MIXO, domb9:ALT, alt1:ALT, alt2:ALT, dim7:[0,2,3,5,6,8,9,11], dim:[0,2,3,5,6,8,9,11], six9:MAJ, sus4b9:ALT, lyd:[0,2,4,6,7,9,10],
-  s9:ALT, dom7b13:[0,2,4,5,7,8,10], hyb:[0,1,3,4,6,7,9,10], mM7:[0,2,3,5,7,9,11], m6:[0,2,3,5,7,9,10], add2:MAJ, aug:[0,2,4,6,8,10], sus4:MIXO };
-const DOMS = ['dom7','dom9','domb9','dom13','lyd','sus9','sus4b9','dim7','alt1','alt2','dom7b13','hyb','sus4','s9'];
+  s9:ALT, dom7b13:[0,2,4,5,7,8,10], hyb:[0,1,3,4,6,7,9,10], mM7:[0,2,3,5,7,9,11], m6:[0,2,3,5,7,9,10], add2:MAJ, aug:[0,2,4,6,8,10], sus4:MIXO,
+  sus2:MAJ, six:MAJ, dom7sus4:MIXO, dom7s11:[0,2,4,6,7,9,10] };
+const DOMS = ['dom7','dom9','domb9','dom13','lyd','sus9','sus4b9','dim7','alt1','alt2','dom7b13','hyb','sus4','s9','dom7sus4','dom7s11'];
 // Kết quả chỉ phụ thuộc gốc, loại, bass của hai hợp âm → nhớ lại (bộ rà chọi gọi hàng triệu lần)
 const CLASH_MEMO = new Map(), TYPE_NO = {};
 const clashCode = c => { let t = TYPE_NO[c.type]; if (t === undefined) t = TYPE_NO[c.type] = Object.keys(TYPE_NO).length; return (t * 13 + (c.bass ?? 12)) * 12 + c.root; };
@@ -1596,7 +1855,7 @@ function clashes0(x, y) {
 // Họ hợp âm (tab Tái hoà âm): maj (trưởng), min (thứ), dom (hợp âm 7), hdim (m7b5), other (giảm, tăng, có bass riêng)
 function chordFamily(c) {
   if (c.bass != null) return 'other';
-  if (['maj', 'maj7', 'maj9', 'maj13s11', 'add2', 'six9'].includes(c.type)) return 'maj';
+  if (['maj', 'maj7', 'maj9', 'maj13s11', 'add2', 'six9', 'six'].includes(c.type)) return 'maj';
   if (c.type === 'm7b5') return 'hdim';
   if (MINORISH.includes(c.type)) return 'min';
   if (DOM_ALL.includes(c.type)) return 'dom';
@@ -3488,6 +3747,43 @@ p4Batch(7, 30, 32),
     const cs = parseProg('Db Gb Ab Db').chords, o = baseOptions(cs[1], cs[2], 1), w = o.find(x => x.c.name === 'Gbm7').why, w6 = o.find(x => x.c.name === 'Gbm6').why;
     ok(w.includes('Bbb (phím A)') && !w.includes('Gb, A,'), w); ok(w6.includes('Bbb (phím A)') && !/nốt A /.test(w6), w6);
     eq(noteWord(parseSymbol('Gbm7'), 9, FLAT_NAMES), 'Bbb (phím A)'); eq(noteWord(parseSymbol('Am7'), 0, FLAT_NAMES), 'C'); } },
+{ name:'TV-T1: thế bấm chuẩn, hình tay, nhóm giọng, chấm', fn() {
+    const P = parseChord, Q = s => parseSymbol(s), mods = ns => ns.map(n => n % 12).join();
+    eq(stdVoicing(P('C')).rh.join(), '60,64,67'); eq(stdVoicing(P('C')).lh.length, 0);
+    eq(stdVoicing(P('C'), { inv:1 }).rh.join(), '64,67,72'); eq(stdVoicing(P('C'), { hand:'L', inv:2 }).lh.join(), '55,60,64');
+    eq(stdVoicing(Q('C7')).lh.join(), '36'); eq(stdVoicing(Q('C7')).rh.join(), '60,64,67,70');
+    eq(mods(stdVoicing(Q('C9')).rh), '4,7,10,2');     // ≤ 4 nốt: 3, 5, b7, 9
+    eq(mods(stdVoicing(Q('C13')).rh), '4,10,2,9');    // 3, b7, 9, 13
+    eq(mods(stdVoicing(Q('Cm11')).rh), '3,10,2,5');   // b3, b7, 9, 11
+    eq(mods(stdVoicing(Q('C6')).rh), '0,4,7,9'); eq(mods(voicingAt(Q('C6'), 3).rh), '4,7,9');
+    eq(stdVoicing(Q('B13')).rh.join(), '63,69,73,80');
+    eq(stdVoicing(Q('C/E')).lh.join(), '40'); ok(stdVoicing(Q('C/E')).rh[0] % 12 !== 4, 'tay phải không bắt đầu bằng nốt bass');
+    eq(stdVoicing(Q('C9/E')).lh.join(), '40'); ok(stdVoicing(Q('C9/E')).rh[0] % 12 !== 4, 'C9/E: tay phải bỏ E');
+    const set9 = v => [...new Set([...v.lh, ...v.rh].map(n => n % 12))].sort((a, b) => a - b).join();
+    eq(set9(stdVoicing(Q('C9/E'))), '0,2,4,7,10'); ok(set9(stdVoicing(Q('Fmaj9/A'))).split(',').includes('5'), 'Fmaj9/A thiếu F');
+    ok(libGrade([40, 60, 67, 70, 74], stdVoicing(Q('C9/E'))), 'C9/E bấm đủ nốt phải đúng');
+    ok(stdVoicing(Q('B13/D#')).rh[0] < 72 && stdVoicing(Q('B13/D#')).rh[0] >= 60, 'B13/D#: tay phải bắt đầu trong 60–71');
+    ok(!stdVoicing(Q('C7(b13)')).rh.some(n => n % 12 === 7), '7(b13) bấm chuẩn không có nốt 5');
+    eq(shapeChords(SHAPES[12]).length, 48); ok(shapeChords(SHAPES[12]).every(c => c.bass != null), 'hình 13 toàn bass riêng');
+    ok(shapeChords(SHAPES[12]).some(c => c.name === 'G/B') && shapeChords(SHAPES[12]).some(c => c.name === 'Fm/G'), 'hình 13 thiếu G/B, Fm/G');
+    eq(parseSymbol('Csus2').type, 'sus2'); eq(parseSymbol('C6').type, 'six'); eq(parseSymbol('C6/9').type, 'six9'); eq(parseSymbol('C7sus4').type, 'dom7sus4');
+    eq(parseSymbol('C7sus').type, 'sus9'); eq(parseSymbol('C6').name, 'C6');
+    // "7(#11)" mặc định vẫn là lyd (bài học, Tái hoà âm, test cũ); thư viện đọc bản thường bằng { lib:true }
+    eq(parseSymbol('C7(#11)').type, 'lyd'); eq(parseSymbol('C7(#11)', { lib:true }).type, 'dom7s11'); eq(chord(0, 'dom7s11').name, 'C7(#11)');
+    eq(SHAPES.length, 13); eq(SHAPES.filter(s => s.std).length, 5);
+    const s12 = SHAPES[11].voice(Q('G7')); eq(s12.lh.map(n => n % 12).sort((a, b) => a - b).join(), '5,11');   // 3–7 của G7: B, F
+    ok(libGrade([47, 53, 67, 71, 74], s12), 'G7 hình 12'); ok(!libGrade([43, 47, 53, 67, 71, 74], s12), 'hình 12 không có gốc ở dưới');
+    for (const sh of SHAPES) for (const t of sh.types) for (let r = 0; r < 12; r++) { const v = sh.voice(chord(r, t)); ok(v.lh.length + v.rh.length >= 3, sh.id + ' ' + t); }
+    const kc = keyGroup(0).map(c => c.name); ['C','Dm','Em','F','G','Am','Bdim','Cmaj7','G7','Bm7b5','E7','A7','Fm6','Abmaj7','Bb7','Bb7(#11)','Db7(#11)','E'].forEach(n => ok(kc.includes(n), 'giọng C thiếu ' + n));
+    eq(new Set(kc).size, kc.length);
+    ok(keyGroup(1).some(c => c.name === 'Db'), 'giọng Db phải viết Db'); ok(keyGroup(4).some(c => c.name === 'G#m'), 'giọng E phải viết G#m');
+    ok(keyGroup(3).some(c => c.name === 'Cm'), 'giọng Eb: Cm'); ok(keyGroup(5).some(c => c.name === 'Bb'), 'giọng F: Bb');
+    const a = stdVoicing(P('Am')); ok(libGrade([57, 60, 64], a)); ok(libGrade([69, 72, 76], a)); ok(!libGrade([60, 64, 69], a)); ok(!libGrade([57, 60, 64, 67], a)); ok(!libGrade([], a));
+    LIB_TYPES.flatMap(g => g.types).forEach(t => ok(TYPES[t] && STD_RH[t], 'thiếu loại ' + t));
+    for (const t of ['sus2', 'six', 'dom7sus4', 'dom7s11']) for (let r = 0; r < 12; r++) { const c = chord(r, t); ok(voicing(c).rh.length && howTo(c), c.name);
+      ok(Array.isArray(clashes(c, chord(r + 5, 'maj'))) && Array.isArray(clashes(chord(r + 7, 'dom7'), c)), 'chọi ' + c.name); }
+    const pr = parseProg('C6 Csus2 G7sus4 C'); ok(pr.chords && pr.chords.length === 4, 'Tái hoà âm đọc được loại mới');
+    ok(Array.isArray(reharmAll(pr.chords, [null, null, null, null])), 'reharmAll với loại mới'); } },
 ];
 // Mỗi test có thể trả về Promise; đợi tối đa 5 giây cho mỗi test
 async function runTests(list) {
@@ -3524,6 +3820,8 @@ if (typeof document !== 'undefined') {
   const LO = 36, HI = 84;
   const isBlack = n => [1,3,6,8,10].includes(n % 12);
   let mid = {}, kbTab = null, kbKey = 0, target = null, targetTop = null, targetTopName = null, demo = null, showing = false, tapped = new Set(), held = new Set(), onDone = null;
+  // libQ: câu tập của Thư viện { v: thế đáp án, need: số nốt khác tên, hit(), armedAt, done } — có thì chấm bằng libGrade theo đúng thế đáp án
+  let libQ = null, libRun = null;
 
   // âm thanh khi chạm phím ảo
   let oscs = [];
@@ -3548,7 +3846,7 @@ if (typeof document !== 'undefined') {
 
   function drawKb() {
     const kb = $('kb'); kb.innerHTML = '';
-    const v = demo ? demo.v : target && showing ? voicing(target) : { lh:[], rh:[] };
+    const v = demo ? demo.v : target && showing ? (libQ ? libQ.v : voicing(target)) : { lh:[], rh:[] };
     let x = 0; mid = {};   // tâm ngang của từng phím, để đặt nhãn tay trái/phải
     const tTab = kbTab && !demo && target ? targetTab(target) : null;   // chỉ ở bài có giọng (kbTab): ngoài bài giữ tên phím mặc định
     for (let n = LO; n <= HI; n++) {
@@ -3568,7 +3866,7 @@ if (typeof document !== 'undefined') {
     }
     kb.style.width = $('kblabels').style.width = x + 'px';
     // tên hợp âm ngay trên từng tay
-    const hn = !demo && target && showing ? handNames(target) : {};
+    const hn = demo ? demo.hn || {} : target && showing && !libQ ? handNames(target) : {};   // demo.hn: tên từng tay đã tính sẵn (tab Thư viện)
     $('kblabels').innerHTML = [[v.lh, 'lh'], [v.rh, 'rh']].filter(([ns]) => ns.length).map(([ns, cls]) => {
       const label = hn[cls] || (demo && demoName(ns, demo.lab)) || ns.map(n => demo && demo.lab && demo.lab[n] ? demo.lab[n].replace(/\d+$/, '') : !demo && target && showing ? spell(target, n) : (kbTab || NAMES)[n % 12]).join(' ');
       const cx = (mid[Math.min(...ns)] + mid[Math.max(...ns)]) / 2;
@@ -3579,7 +3877,7 @@ if (typeof document !== 'undefined') {
   // Hiện hợp âm lên bàn phím khi đang nghe vòng (không cuộn trang)
   function showChord(c, label = 'Đang nghe') {
     if (c.demo) return showNotes(c, label);
-    demo = null; target = c; targetTop = null; targetTopName = null; onDone = null; showing = true; tapped.clear();
+    demo = null; target = c; targetTop = null; targetTopName = null; onDone = null; showing = true; tapped.clear(); libQ = null;
     $('ptitle').innerHTML = `${label}: <b>${esc(c.name)}</b>`;
     $('phint').textContent = howTo(c); $('pres').textContent = '';
     drawKb();
@@ -3593,7 +3891,7 @@ if (typeof document !== 'undefined') {
     return { demo: true, name: pairs.map(p => p[1]).join(' + '), notes, lab: Object.fromEntries(pairs), v: splitHands(names) };
   }
   function showNotes(c, label = 'Đang nghe') {
-    demo = c; target = null; targetTop = null; targetTopName = null; onDone = null; showing = false; tapped.clear();
+    demo = c; target = null; targetTop = null; targetTopName = null; onDone = null; showing = false; tapped.clear(); libQ = null;
     $('ptitle').innerHTML = `${label}: <b>${esc(c.name)}</b>`;
     $('phint').textContent = ''; $('pres').textContent = '';
     drawKb();
@@ -3601,7 +3899,7 @@ if (typeof document !== 'undefined') {
   }
 
   function setTarget(c, done, top = null, topName = null) {   // top: nốt trên cùng cần có (số 0–11), topName: cách gọi tên nốt đó
-    demo = null; target = c; targetTop = top; targetTopName = topName; onDone = done || null; showing = false; tapped.clear();
+    demo = null; target = c; targetTop = top; targetTopName = topName; onDone = done || null; showing = false; tapped.clear(); libQ = null;
     $('ptitle').innerHTML = `Bấm thử: <b>${c.name}</b>`;
     $('phint').textContent = 'Bấm trên đàn, hoặc chạm phím ảo rồi nhấn Kiểm tra';
     $('pres').textContent = '';
@@ -3611,6 +3909,13 @@ if (typeof document !== 'undefined') {
 
   function judge(notes) {
     if (!target) return;
+    if (libQ) {   // Thư viện: đúng bộ nốt (mod 12) và đúng nốt thấp nhất của thế đáp án
+      const q = libQ; if (q.done || performance.now() < q.armedAt || (libRun && libRun.confirming)) return;   // guardMs như Vượt màn; đang hỏi xác nhận thì không chấm
+      const good = libGrade(notes, q.v);
+      $('pres').innerHTML = good ? '<span class="ok">✓ Đúng rồi!</span>' : `<span class="bad">${esc(libMiss(notes, target, q.v))}</span>`;
+      if (good) { q.done = true; play(notes); q.hit(); }
+      return;
+    }
     const r = targetTop != null ? gradeTop(notes, target, targetTop, targetTopName || undefined) : grade(notes, target);
     $('pres').innerHTML = `<span class="${r.ok ? 'ok' : 'bad'}">${r.msg}</span>`;
     if (r.ok) {
@@ -3623,6 +3928,7 @@ if (typeof document !== 'undefined') {
 
   $('show').onclick = () => {
     if (!target) return;
+    if (libQ) { libReveal(); return; }   // Thư viện: hiện đáp án (lượt tính điểm: câu này tính sai)
     showing = !showing;
     $('phint').textContent = showing ? howTo(target) : '';
     drawKb();
@@ -3644,7 +3950,7 @@ if (typeof document !== 'undefined') {
           else if (cmd === 0x80 || cmd === 0x90) { held.delete(n); drawKb(); return; }   // nhả phím: không chấm
           else return;
           drawKb();
-          if (target && held.size >= pcsOf(target).size) judge([...held]);
+          if (target && held.size >= (libQ ? libQ.need : pcsOf(target).size)) judge([...held]);
         });
       };
       hook(); acc.onstatechange = hook;
@@ -3655,9 +3961,9 @@ if (typeof document !== 'undefined') {
   const PART_TITLES = { 3:'Phildave 3 — Tension Mastering', 4:'Phildave 4 — CCM Reharmony Bible', 1:'Phildave 1 — Voicing II–V–I theo giai điệu', 2:'Phildave 2 — Tip Book 1' };
   const esc = escHtml;
   let lessonRun = 0;   // đổi mỗi lần vào/ra bài, để callback trễ của bài cũ không chạy
-  function clearTarget() { lessonRun++; kbTab = null; stopPlay(); resetPanel(); cancelChallenge(); }
+  function clearTarget() { lessonRun++; kbTab = null; stopPlay(); resetPanel(); cancelChallenge(); cancelLib(); $('practice').classList.remove('lib'); }
   function resetPanel() {
-    demo = null; target = null; targetTop = null; targetTopName = null; onDone = null; showing = false; tapped.clear();
+    demo = null; target = null; targetTop = null; targetTopName = null; onDone = null; showing = false; tapped.clear(); libQ = null;
     $('ptitle').textContent = 'Mở một bài ở mục Học, hoặc chạm hợp âm ở mục Tái hoà âm để luyện tay';
     $('phint').textContent = ''; $('pres').textContent = ''; drawKb();
   }
@@ -3841,8 +4147,12 @@ if (typeof document !== 'undefined') {
   function historyChart(history, sel) {
     const h = selectionHistory(history, sel).slice(-10);
     if (!h.length) return '<p class="mut">Chưa có lần làm nào với lựa chọn này (dạng + giọng + mốc giờ).</p>';
-    return `<div class="hchart" aria-label="Điểm ${h.length} lần gần nhất"><div class="hplot"><div class="hline" style="bottom:${PASS_MARK / ROUND_LEN * 100}%"><span>${PASS_MARK}</span></div>` +
-      h.map(a => `<div class="hcol" title="${esc(new Date(a.at).toLocaleDateString('vi-VN'))} · ${esc(fmtDur(a.ms))}"><div class="hbar${a.score >= PASS_MARK ? ' pass' : ''}" style="height:${a.score / ROUND_LEN * 100}%"></div><span>${a.score}</span></div>`).join('') + '</div></div>';
+    return barsChart(h, ROUND_LEN, PASS_MARK, a => fmtDur(a.ms));
+  }
+  // cột điểm của các lần làm (h), điểm tối đa max, vạch qua màn pass (null = không vạch), sub(a) = dòng phụ khi rê chuột
+  function barsChart(h, max, pass, sub) {
+    return `<div class="hchart" aria-label="Điểm ${h.length} lần gần nhất"><div class="hplot">${pass != null ? `<div class="hline" style="bottom:${pass / max * 100}%"><span>${pass}</span></div>` : ''}` +
+      h.map(a => `<div class="hcol" title="${esc(new Date(a.at).toLocaleDateString('vi-VN'))} · ${esc(sub(a))}"><div class="hbar${pass != null && a.score >= pass ? ' pass' : ''}" style="height:${a.score / max * 100}%"></div><span>${a.score}</span></div>`).join('') + '</div></div>';
   }
   function challengeSetup(canRun) {
     const st = quizState, sel = selOf();
@@ -3890,7 +4200,7 @@ if (typeof document !== 'undefined') {
     const r = challenge.run; if (!r || r.answered || document.hidden || r.confirming || r.timerId != null || r.hiddenAt == null) return;
     r.t0 += challenge.clock() - r.hiddenAt; r.hiddenAt = null; r.timerId = setInterval(challengeTick, 100);
   }
-  function onVisibility() { if (document.hidden) pauseChallenge(); else resumeChallenge(); }
+  function onVisibility() { if (document.hidden) { pauseChallenge(); libPause(); } else { resumeChallenge(); libResume(); } }
   document.addEventListener('visibilitychange', onVisibility);
   // Gọi mỗi 100 ms; test gọi tay với đồng hồ giả. Chỉ chạy khi đang chờ trả lời.
   function challengeTick() {
@@ -4080,6 +4390,8 @@ if (typeof document !== 'undefined') {
     $('main').innerHTML = `<div class="card"><h3>Nhập vòng hợp âm</h3>
       <input id="pin" value="${prog.join(' ')}" placeholder="VD: C Am F G">
       <button class="b pri" id="go">Gợi ý</button><span class="mut"> (hợp âm ba nốt hoặc hợp âm 7, ví dụ G7, Am7, Cmaj7, D9; cách nhau bằng dấu cách)</span>
+      <p class="mut" style="margin-top:8px">Hoặc chọn bằng click: bấm nốt gốc rồi loại hợp âm, tên được thêm vào cuối ô trên.</p>
+      <div id="rhpick"></div><button class="b" id="rhback">⌫ Bỏ hợp âm cuối</button>
       <div class="row" style="margin-top:6px"><label>Giọng: <select id="keySel" class="b"><option value="" ${keyPick == null ? 'selected' : ''}>Tự nhận (theo hợp âm đã gõ)</option>${KEY12.map((k, q) =>
         `<option value="${q}" ${q === keyPick ? 'selected' : ''}>${k} trưởng · ${(/b/.test(k) || k === 'F' ? FLAT_NAMES : SHARP_NAMES)[(q + 9) % 12]} thứ</option>`).join('')}</select></label></div></div><div id="out"></div>`;
     let cs = [], curBars = () => [];
@@ -4193,10 +4505,285 @@ if (typeof document !== 'undefined') {
     };
     // đổi giọng: chỉ số lựa chọn đổi theo giọng → bỏ mọi lựa chọn
     $('keySel').onchange = () => { const v = $('keySel').value; keyPick = v === '' ? null : +v; picks = null; bp = []; lastB = undefined; stopPlay(); if (cs.length) render(); };
+    // bộ chọn click: chỉ nối tên vào cuối ô nhập (cách một dấu cách); ô nhập và nút "Gợi ý" giữ nguyên
+    chordPicker($('rhpick'), c => { const pin = $('pin'), t = pin.value.trim(); pin.value = (t ? t + ' ' : '') + c.name; }, { skip: RH_PICK_SKIP, collapse: true });
+    $('rhback').onclick = () => { const pin = $('pin'); pin.value = pin.value.trim().split(/\s+/).slice(0, -1).join(' '); };
     $('go').click();
   }
 
-  const TABS = { learn, quiz, reharm };
+  // ---- Bộ chọn hợp âm bằng click (dùng ở Thư viện và Tái hoà âm) ----
+  // Hàng 12 nút gốc; bấm một gốc → các nút loại theo LIB_TYPES; bấm một loại → onPick(chord).
+  // opts.skip: loại không hiện (Tái hoà âm bỏ dom7s11 vì ô nhập đọc "7(#11)" là kiểu thầy); opts.collapse: chọn xong thì gập lại
+  // Tái hoà âm: bỏ 7(#11) cơ bản (ô nhập đọc "7(#11)" là kiểu thầy) và tên có dấu cách 7(#9 b13), 7(b9 b13) (ô nhập tách hợp âm theo dấu cách)
+  const RH_PICK_SKIP = ['dom7s11', ...Object.keys(TYPES).filter(t => /\s/.test(TYPES[t].suf))];
+  function chordPicker(el, onPick, opts = {}) {
+    let root = null;
+    const skip = opts.skip || [];
+    const draw = () => {
+      el.innerHTML = `<div class="pkroots">${PICK_ROOTS.map((lab, r) => `<button class="b seg${r === root ? ' act' : ''}" data-root="${r}">${lab}</button>`).join('')}</div>` +
+        (root == null ? '' : LIB_TYPES.map(g => `<div class="pkrow"><span class="mut">${LIB_GROUP_LABEL[g.group]}</span>${g.types.filter(t => !skip.includes(t)).map(t =>
+          `<button class="b" data-type="${t}">${esc((opts.label || libLabel)(libChord(root, t)))}</button>`).join('')}</div>`).join(''));
+      el.querySelectorAll('[data-root]').forEach(b => b.onclick = () => { root = +b.dataset.root === root ? null : +b.dataset.root; draw(); });
+      el.querySelectorAll('[data-type]').forEach(b => b.onclick = () => { const c = libChord(root, b.dataset.type); if (opts.collapse) { root = null; draw(); } onPick(c); });
+    };
+    draw();
+  }
+
+  // ---- Thư viện · Tập bấm: Tập tự do (hiện đáp án sau N giây) và Tính điểm (20 câu, hết giờ tính sai) ----
+  // Dùng chung đồng hồ cắm được của Vượt màn (challenge.clock / sec / guardMs). libCfg.nextMs: chờ sau khi bấm đúng rồi sang câu kế (test đặt 0)
+  const libCfg = { nextMs: TEST_MODE ? 0 : 700 };
+  const libTimer = id => TIMER_LEVELS.find(t => t.id === id) || TIMER_LEVELS[1];
+  const libGroupName = g => g.kind === 'key' ? `Giọng ${keyName(g.key)}` : `Hình tay ${g.id}: ${SHAPES[g.id - 1].name}`;
+  const libStyleName = st => st === 'std' ? 'Bấm chuẩn' : `Kiểu Phildave (Mức tay ${settings.level})`;
+  const libHands = (c, v) => { const tab = /#/.test(c.rootName ?? nm(c.root)) ? SHARP_NAMES : FLAT_NAMES, ws = ns => ns.map(n => spW(c, n, tab)).join(' ');
+    return { text: v.lh.length && v.rh.length ? `Tay trái: ${ws(v.lh)} · Tay phải: ${ws(v.rh)}` : v.lh.length ? `Tay trái (một tay): ${ws(v.lh)}` : `Tay phải (một tay): ${ws(v.rh)}`, lh: ws(v.lh) }; };
+  // Cuộn bàn phím cho thấy thế v: vừa khung thì căn giữa; không vừa thì tay phải đủ nốt, tay trái ghi bằng chữ ở mép trái
+  function fitKb(v, lhText) {
+    const all = [...v.lh, ...v.rh]; if (!all.length) return;
+    const wrap = $('kbwrap'), W = wrap.clientWidth, lo = mid[Math.min(...all)] - 20, hi = mid[Math.max(...all)] + 20, fit = hi - lo <= W;
+    wrap.scrollLeft = fit ? (lo + hi - W) / 2 : v.rh.length ? mid[Math.min(...v.rh)] - 20 - Math.max(0, (W - (mid[Math.max(...v.rh)] - mid[Math.min(...v.rh)] + 40)) / 2) : lo;
+    if (!fit && v.lh.length && mid[Math.max(...v.lh)] < wrap.scrollLeft) {
+      $('kblabels').insertAdjacentHTML('beforeend', `<span class="hand lh" id="lhaway" data-lhx="${mid[Math.max(...v.lh)]}" title="Chạm để cuộn tới tay trái">◀ Tay trái: ${esc(lhText)}</span>`);
+      $('lhaway').onclick = () => { wrap.scrollLeft = mid[Math.min(...v.lh)] - 40; };   // chạm nhãn: cuộn tới tay trái để chạm phím
+    }
+  }
+  // nhãn "◀ Tay trái" dính mép trái khi cuộn tay (sticky); ẩn khi tay trái đã nằm trong khung
+  $('kbwrap').addEventListener('scroll', () => { const e = $('lhaway'); if (e) e.style.visibility = $('kbwrap').scrollLeft > +e.dataset.lhx ? '' : 'hidden'; });
+  function cancelLib() { const r = libRun; libRun = null; libQ = null; if (r && r.timerId != null) clearInterval(r.timerId); }
+  // o = { mode: 'free' | 'score', group, types, white, timer }; kiểu bấm lấy từ settings.libStyle (hình 6–13: thế cố định, ghi 'phil')
+  function libStart(o) {
+    cancelLib();
+    const pool = libPool(o.group, { types: o.types, white: o.white }); if (!pool.length) return;
+    libRun = { mode: o.mode, group: o.group, types: o.types, white: o.white, timer: o.timer, pool, style: libFixedShape(o.group) ? 'phil' : settings.libStyle, level: settings.level,
+      qs: o.mode === 'score' ? libOrder(pool) : null, i: 0, res: [], count: 0, c: null, timerId: null, t0: 0, limit: 0, hiddenAt: null, revealed: false, hit: false, confirming: false };
+    libAsk();
+  }
+  function libAsk() {
+    const r = libRun, prev = r.c;
+    if (r.mode === 'score') r.c = r.qs[r.i];
+    else { const cand = prev && r.pool.length > 1 ? r.pool.filter(c => libId(c) !== libId(prev)) : r.pool; r.c = cand[Math.floor(Math.random() * cand.length)]; }   // tự do: không lặp hợp âm vừa bấm
+    r.revealed = false; r.hit = false; r.hiddenAt = null; r.how = null;
+    r.limit = (challenge.sec != null ? challenge.sec : libTimer(r.timer).sec) * 1000;
+    libView(); setTarget(r.c); libSetQ();
+    r.t0 = challenge.clock();
+    if (document.hidden) r.hiddenAt = r.t0; else r.timerId = setInterval(libTick, 100);   // trang đang ẩn (ẩn trong lúc chờ sang câu): chờ hiện lại mới chạy giờ
+  }
+  // đặt câu đang hỏi lên bảng luyện: thế đáp án theo kiểu của lượt; chấm bằng libGrade (judge), chạm phím + Kiểm tra cũng chấm
+  function libSetQ() {
+    const r = libRun, v = libAnswer(r.c, r.group, r.style);
+    libQ = { v, need: v.lh.length && v.rh.length ? new Set([...v.lh, ...v.rh]).size : new Set([...v.lh, ...v.rh].map(n => n % 12)).size, hit: libHit, armedAt: performance.now() + challenge.guardMs, done: r.hit };
+    showing = r.revealed; $('practice').classList.remove('lib');
+    $('ptitle').innerHTML = `Bấm: <b>${esc(libLabel(r.c))}</b>`;
+    $('phint').textContent = r.revealed ? libHands(r.c, v).text : 'Bấm trên đàn, hoặc chạm phím ảo rồi nhấn Kiểm tra';
+    drawKb(); if (r.revealed) fitKb(v, libHands(r.c, v).lh);
+  }
+  function libScoreLine() {
+    const r = libRun; if (!r) return; const ok = r.res.filter(x => x.ok).length;
+    if ($('lprog') && r.mode === 'free') $('lprog').textContent = `Tập tự do · đã bấm ${r.count}`;
+    if ($('lscore')) $('lscore').textContent = `Đúng ${ok} · Sai ${r.res.length - ok}`;
+  }
+  function libRevealText() {
+    const r = libRun, v = libAnswer(r.c, r.group, r.style), sh = r.group.kind === 'shape' ? SHAPES[r.group.id - 1] : null;
+    const tip = libTip(r.c, r.style, v, { inv: sh && sh.std ? (sh.id === 2 ? 1 : sh.id === 3 ? 2 : 0) : 0, shape: sh && !sh.std ? sh : null });
+    const head = r.mode === 'score' ? `<span class="bad">${r.how === 'show' ? 'Đã xem đáp án' : 'Hết giờ'} — câu này tính sai.</span> ` : '';
+    return `<p>${head}Thế bấm hiện trên bàn phím; bấm đúng để sang hợp âm kế.</p><p><b>${esc(libHands(r.c, v).text)}</b></p><div class="tip">Mẹo: ${esc(tip)}</div>`;
+  }
+  function libView() {
+    const r = libRun, sc = r.mode === 'score', fixed = libFixedShape(r.group), ok = r.res.filter(x => x.ok).length;
+    $('main').innerHTML = `<div class="card" id="lrun"><div class="row" style="justify-content:space-between;margin:0"><b id="lprog">${sc ? `Câu ${r.i + 1}/${LIB_ROUND}` : `Tập tự do · đã bấm ${r.count}`}</b>${sc ? `<span id="lscore" class="mut">Đúng ${ok} · Sai ${r.res.length - ok}</span>` : ''}<button class="b" id="lstop" style="margin:0">Dừng</button></div>
+      <div class="row" style="flex-wrap:nowrap;margin:8px 0 2px"><div class="tbar"><i id="lfill" style="width:${r.revealed ? 0 : 100}%"></i></div><b id="lsec" class="tsec">${r.revealed ? 0 : Math.ceil(r.limit / 1000)}</b></div>
+      <div class="mut">${esc(libGroupName(r.group))} · ${sc ? 'hết giờ tính sai' : 'hết giờ thì hiện đáp án'}</div>
+      <div class="libname" id="lname">${esc(libLabel(r.c))}</div>
+      ${fixed ? `<p class="mut">Hình ${r.group.id} luôn bấm đúng thế của hình (không theo Mức tay).</p>` : `<div class="row"><span class="mut">Kiểu bấm:</span>${['std', 'phil'].map(k => `<button class="b seg${r.style === k ? ' act' : ''}" data-libstyle="${k}">${k === 'std' ? 'Bấm chuẩn' : 'Kiểu Phildave'}</button>`).join('')}</div>${r.style === 'phil' ? `<p class="mut">Kiểu Phildave theo Mức tay ${r.level}.</p>` : ''}`}
+      <div id="lfb">${r.revealed ? libRevealText() : ''}</div></div>`;
+    $('lstop').onclick = () => { if (libRun !== r) return; if (!sc) { cancelLib(); library(); return; }
+      libConfirm('Dừng lượt này? Điểm không được lưu.', 'Dừng hẳn', 'Tập tiếp', () => { cancelLib(); library(); }); };
+    $('lrun').querySelectorAll('[data-libstyle]').forEach(b => b.onclick = () => {
+      const k = b.dataset.libstyle; if (libRun !== r || k === r.style || r.confirming) return;
+      if (sc) libConfirm('Đổi kiểu sẽ bắt đầu lại lượt này?', 'Bắt đầu lại', 'Giữ kiểu cũ', () => { settings.libStyle = k; persist(); libStart({ mode: r.mode, group: r.group, types: r.types, white: r.white, timer: r.timer }); });
+      else { settings.libStyle = k; persist(); r.style = k; libView(); libSetQ(); }   // tự do: đổi ngay, câu đang hỏi đổi thế theo
+    });
+  }
+  // hỏi lại trong trang; đồng hồ dừng trong lúc hỏi, phím bấm không được chấm
+  function libConfirm(msg, yes, no, onYes, onNo) {
+    const r = libRun; if (!r || $('lconfirm')) return; r.confirming = true; libPause();
+    $('lprog').closest('.row').insertAdjacentHTML('afterend', `<div id="lconfirm" class="row confirm"><span>${esc(msg)}</span><button class="b" id="lyes">${esc(yes)}</button><button class="b pri" id="lno">${esc(no)}</button></div>`);
+    $('lyes').onclick = () => { if (libRun === r) onYes(); };
+    $('lno').onclick = () => { if (libRun !== r) return; r.confirming = false; $('lconfirm').remove(); if (onNo) onNo(); libResume();
+      if (r.pendingNext) { const g = r.pendingNext; r.pendingNext = null; g(); } };   // bấm đúng ngay trước khi hỏi: giờ mới sang câu kế
+  }
+  // trang bị ẩn hay đang hỏi xác nhận: dừng đồng hồ; chạy lại thì phần thời gian đã dừng không tính
+  function libPause() { const r = libRun; if (r && !r.revealed && !r.hit && r.timerId != null) { clearInterval(r.timerId); r.timerId = null; r.hiddenAt = challenge.clock(); } }
+  function libResume() {
+    const r = libRun; if (!r || r.revealed || r.hit || document.hidden || r.confirming || r.timerId != null || r.hiddenAt == null) return;
+    r.t0 += challenge.clock() - r.hiddenAt; r.hiddenAt = null; r.timerId = setInterval(libTick, 100);
+  }
+  function libTick() {
+    const r = libRun; if (!r || r.revealed || r.hit || r.hiddenAt != null) return;
+    const left = r.limit - (challenge.clock() - r.t0);
+    if (left <= 0) { libReveal('time'); return; }
+    const f = $('lfill'), t = $('lsec'); if (!f || !t) return;
+    f.style.width = (left / r.limit * 100) + '%'; f.classList.toggle('low', left / r.limit <= 0.25); t.textContent = Math.ceil(left / 1000);
+  }
+  // hết giờ (how = 'time') hoặc bấm "Hiện cách bấm" ('show'): hiện thế đáp án; lượt tính điểm thì câu này tính sai; vẫn phải bấm đúng mới đi tiếp
+  function libReveal(how = 'show') {
+    const r = libRun; if (!r || r.revealed || r.hit || r.confirming) return;
+    r.revealed = true; r.how = how; if (r.timerId != null) clearInterval(r.timerId); r.timerId = null; r.hiddenAt = null;
+    if (r.mode === 'score') r.res.push({ ok: false, ms: r.limit });
+    const f = $('lfill'); if (f) f.style.width = '0%'; if ($('lsec')) $('lsec').textContent = '0';
+    libScoreLine(); if ($('lfb')) $('lfb').innerHTML = libRevealText();
+    libSetQ();
+  }
+  function libHit() {
+    const r = libRun; if (!r || r.hit) return;
+    r.hit = true;
+    if (!r.revealed) {
+      if (r.timerId != null) clearInterval(r.timerId); r.timerId = null;
+      const ms = (r.hiddenAt != null ? r.hiddenAt : challenge.clock()) - r.t0;
+      if (r.mode === 'score') r.res.push(ms >= r.limit ? { ok: false, ms: r.limit } : { ok: true, ms: Math.max(0, ms) });   // bấm đúng nhưng trễ sau khi hết giờ: không tính
+    }
+    r.count++; libScoreLine();
+    const go = () => { if (libRun !== r) return; if (r.confirming) { r.pendingNext = go; return; }   // đang hỏi Dừng / đổi kiểu: chờ trả lời
+      if (r.mode === 'score' && ++r.i >= LIB_ROUND) libFinish(); else libAsk(); };
+    if (libCfg.nextMs > 0) setTimeout(go, libCfg.nextMs); else go();
+  }
+  function libFinish() {
+    const r = libRun, g = gradeRound(r.res, LIB_ROUND), key = libKey(r.group, r.style, r.timer, r.level);
+    const att = { score: g.score, total: LIB_ROUND, avgMs: Math.round(g.avgMs), at: Date.now() };
+    const before = (progress.lib && progress.lib.history[key]) || [], cmp = compareLib(before, att), after = [...before, att].slice(-LIB_HIST_CAP);
+    progress.lib = { history: { ...((progress.lib && progress.lib.history) || {}), [key]: after } }; persist();   // ?test: persist() không ghi bộ nhớ
+    cancelLib(); resetPanel(); $('practice').classList.add('lib');
+    const line = a => `${a.score}/${LIB_ROUND} · trung bình ${fmtSec(a.avgMs)}`;
+    const diff = cmp.prev && (cmp.vsPrev === 0 ? 'y hệt lần trước'
+      : g.score !== cmp.prev.score ? `${g.score > cmp.prev.score ? 'cao hơn' : 'thấp hơn'} lần trước ${Math.abs(g.score - cmp.prev.score)} điểm`
+      : `bằng điểm, ${att.avgMs < cmp.prev.avgMs ? 'nhanh hơn' : 'chậm hơn'} ${fmtSec(Math.abs(att.avgMs - cmp.prev.avgMs))} mỗi câu`);
+    const miss = r.qs.filter((_, i) => r.res[i] && !r.res[i].ok), tl = libTimer(r.timer);
+    $('main').innerHTML = `<div class="card"><h3>Xong lượt tập</h3><div class="bigscore" id="lfinal">${g.score}/${LIB_ROUND}</div>
+      <p class="mut">${esc(libGroupName(r.group))} · ${r.style === 'std' ? 'Bấm chuẩn' : 'Kiểu Phildave'} · ${tl.label} ${tl.sec}s · Mức tay ${r.level}</p>
+      <p>Thời gian trung bình mỗi câu: <b>${esc(fmtSec(g.avgMs))}</b></p>
+      <p id="lcmp">${cmp.prev ? `So với lần trước (${esc(line(cmp.prev))}): <b>${esc(diff)}</b>.` : 'Lần đầu với lựa chọn này.'}${cmp.isRecord ? (cmp.best ? ' <span class="ok">Tốt nhất mới!</span>' : '') : ` Tốt nhất: <b>${esc(line(cmp.best))}</b>.`}</p>
+      ${miss.length ? `<p class="mut" id="lmiss">Câu sai: ${miss.map(c => esc(libLabel(c))).join(', ')}</p>` : '<p class="ok">Không sai câu nào.</p>'}
+      <div class="row"><button class="b pri" id="lagain">Tập lượt mới</button><button class="b" id="lback">Về thư viện</button></div></div>
+      <div class="card"><div class="qlab">Điểm 10 lần gần nhất (cùng nhóm, kiểu bấm, mốc giờ, mức tay)</div>${barsChart(after, LIB_ROUND, null, a => 'trung bình ' + fmtSec(a.avgMs))}</div>`;
+    $('lagain').onclick = () => libStart({ mode: 'score', group: r.group, types: r.types, white: r.white, timer: r.timer });
+    $('lback').onclick = () => library();
+  }
+
+  // ---- Tab Thư viện: tra cứu bằng gõ / click, hai kiểu bấm, nhóm theo giọng và theo hình tay ----
+  // c: hợp âm đang xem (object, không đọc lại từ tên); shape: hình tay kiểu Phildave khi chọn từ nhóm "theo hình tay"
+  const libSt = { c: null, err: null, q: '', shape: null, inv: 0, group: 'key', key: 0, shapeId: 1, off: [], white: false, mode: 'free', timer: 'mid' };   // off: loại hợp âm bỏ ra khi tập
+  const libErr = s => {
+    const up = x => parseSymbol(x, { lib: true }) ? x : null;
+    const sug = /^[hH]/.test(s) ? up('B' + s.slice(1)) : /^[a-g]/.test(s) ? up(s[0].toUpperCase() + s.slice(1)) : null;
+    const why = /^[hH]/.test(s) ? 'Nốt Si viết là B (không dùng H)' : /^[a-g]/.test(s) ? 'Tên nốt viết hoa' : /\d[#b]\d/.test(s) && !/\(/.test(s) ? 'Nốt màu viết trong ngoặc, ví dụ C7(#11), Cmaj13(#11)' : '';
+    return `<p class="bad">App không đọc được "${esc(s)}".</p><p class="mut">${why ? why + '. ' : ''}${sug ? `Có phải <button class="b" data-libsug="${esc(sug)}">${esc(sug)}</button>?`
+      : 'Viết như C, Am, G7, Cmaj7, F#m7b5, C7(b9), G/B.'}</p>`;
+  };
+  function library() {
+    const st = libSt;
+    cancelLib(); $('practice').classList.add('lib');
+    $('main').innerHTML = `<div class="card"><h3>Tra hợp âm</h3>
+      <input id="libq" placeholder="Gõ tên: E7, Am, G/B, Cmaj9…" autocomplete="off" autocapitalize="sentences" spellcheck="false" value="${esc(st.q)}">
+      <div class="row"><span class="mut">Kiểu bấm:</span><button class="b seg" data-libstyle="std">Bấm chuẩn</button><button class="b seg" data-libstyle="phil">Kiểu Phildave</button></div>
+      <div id="libout"></div></div>
+      <div class="card"><h3>Chọn bằng click</h3><p class="mut">Bấm nốt gốc, rồi bấm loại hợp âm.</p><div id="libpick"></div></div>
+      <div class="card"><h3>Xem theo nhóm</h3><div class="row"><button class="b seg" data-libgroup="key">Theo giọng</button><button class="b seg" data-libgroup="shape">Theo hình tay</button></div><div id="libgrp"></div></div>
+      <div class="card" id="libprac"></div>`;
+    const show = () => {
+      const c = st.c, style = st.shape ? 'phil' : settings.libStyle, out = $('libout');
+      $('main').querySelectorAll('[data-libstyle]').forEach(b => b.classList.toggle('act', b.dataset.libstyle === style));
+      if (st.err) {
+        out.innerHTML = st.err;
+        out.querySelectorAll('[data-libsug]').forEach(b => b.onclick = () => { const q = $('libq'); q.value = b.dataset.libsug; q.dispatchEvent(new Event('input')); });
+        return;
+      }
+      if (!c) { out.innerHTML = '<p class="mut">Gõ tên hợp âm ở trên, hoặc chọn bằng click ở dưới.</p>'; return; }
+      const v = libVoice(c, style, { hand: settings.libHand, inv: st.inv, shape: st.shape }), all = [...v.lh, ...v.rh];
+      const tab = /#/.test(c.rootName ?? nm(c.root)) ? SHARP_NAMES : FLAT_NAMES, w = n => spW(c, n, tab), hh = libHands(c, v), hands = hh.text;
+      const tri = libIsTri(c) && style === 'std';
+      const seg = (attr, val, lab, on) => `<button class="b seg${on ? ' act' : ''}" data-${attr}="${val}">${lab}</button>`;
+      const ctl = tri ? `<div class="row"><span class="mut">Bấm một tay:</span>${seg('libhand', 'R', 'Tay phải', settings.libHand === 'R')}${seg('libhand', 'L', 'Tay trái', settings.libHand === 'L')}</div>
+        <div class="row"><span class="mut">Thế:</span>${['Gốc', 'Đảo 1', 'Đảo 2'].map((lab, i) => seg('libinv', i, lab, st.inv === i)).join('')}</div>` : '';
+      const other = c.type === 'dom7s11' ? lydOf(c) : c.type === 'lyd' && c.suf === '7(#11)' ? chord(c.root, 'dom7s11', c.bass, { rootName: c.rootName ?? nm(c.root), ...(c.bassName ? { bassName: c.bassName } : {}) }) : null;
+      const alt = other ? `<p class="mut">${c.type === 'dom7s11' ? `Bài học của thầy viết ${esc(c.name)} cho một thế khác.` : `Còn có ${esc(c.name)} cơ bản (không có 9, 13).`}
+        <button class="b" data-libalt>Xem ${esc(libLabel(other))}</button></p>` : '';
+      out.innerHTML = `<div class="libname">${esc(libLabel(c))}</div>
+        <p>Các nốt: ${libNotes(c).map(x => `${esc(w(x.n))} (${x.deg})`).join(' ')}${c.bass != null ? ` · bass ${esc(c.bassName ?? nm(c.bass))}` : ''}</p>
+        <p><b>${esc(hands)}</b></p>${ctl}
+        <div class="tip">Mẹo: ${esc(libTip(c, style, v, { inv: tri ? st.inv : 0, shape: st.shape }))}</div>
+        <button class="b pri" id="libplay">▶ Nghe</button>${alt}`;
+      $('libplay').onclick = () => play(all, 1.6);
+      out.querySelectorAll('[data-libhand]').forEach(b => b.onclick = () => { settings.libHand = b.dataset.libhand; persist(); show(); });
+      out.querySelectorAll('[data-libinv]').forEach(b => b.onclick = () => { st.inv = +b.dataset.libinv; show(); });
+      out.querySelectorAll('[data-libalt]').forEach(b => b.onclick = () => { st.c = other; st.shape = null; show(); });
+      // bàn phím: tô thế bấm (màu tay trái / tay phải), chỉ để xem, không chấm
+      target = null; targetTop = null; targetTopName = null; onDone = null; showing = false; tapped.clear();
+      demo = { demo: true, name: c.name, notes: all, v, lab: Object.fromEntries(all.map(n => [n, spell(c, n)])), hn: style === 'phil' && !st.shape ? handNames(c) : {} };
+      $('ptitle').innerHTML = `Thư viện: <b>${esc(libLabel(c))}</b>`; $('phint').textContent = hands; $('pres').textContent = '';
+      drawKb(); fitKb(v, hh.lh);
+    };
+    const pick = (c, sh = null) => {
+      st.c = c; st.err = null; st.q = ''; $('libq').value = ''; st.shape = null; st.inv = 0;
+      if (sh && sh.std) { settings.libStyle = 'std'; st.inv = sh.id === 2 ? 1 : sh.id === 3 ? 2 : 0; persist(); }   // hình 1–5: bấm chuẩn (thế đảo theo hình)
+      else if (sh) st.shape = sh;                                                                                       // hình 6–13: đúng thế của hình
+      show(); prac();
+    };
+    $('libq').oninput = () => {
+      st.q = $('libq').value; const s = st.q.trim(); st.shape = null; st.inv = 0;
+      if (!s) st.err = null;
+      else { const c = parseSymbol(s, { lib: true }); if (c) { st.c = c; st.err = null; } else st.err = libErr(s); }
+      show();
+    };
+    $('main').querySelectorAll('[data-libstyle]').forEach(b => b.onclick = () => { settings.libStyle = b.dataset.libstyle; st.shape = null; persist(); show(); prac(); });
+    chordPicker($('libpick'), c => pick(c), { label: c => c.type === 'lyd' ? `${c.name} = ${c.rootName ?? nm(c.root)}7(#11) kiểu thầy` : libLabel(c) });
+    const grp = () => {
+      $('main').querySelectorAll('[data-libgroup]').forEach(b => b.classList.toggle('act', b.dataset.libgroup === st.group));
+      let list, head;
+      if (st.group === 'key') {
+        const K = keyName(st.key), rel = relName({ root: st.key, rootName: K }, st.key + 9, keyTab(st.key, []));
+        list = keyGroup(st.key);
+        head = `<div class="libkeys">${KEY12.map((_, k) => `<button class="b seg${k === st.key ? ' act' : ''}" data-libkey="${k}">${keyName(k)}</button>`).join('')}</div>
+          <p class="mut">Giọng ${K} trưởng, gồm cả ${rel} thứ: hợp âm trong giọng, các "mẹ" phụ và hợp âm mượn thầy dùng.</p>` +
+          ([1, 6, 8].includes(st.key) ? '<p class="mut">Gốc lẽ ra viết Cb, Fb hay giáng kép (Bbb) được ghi bằng tên phím quen (B, E, A…), như cách viết chung của app.</p>' : '');
+      } else {
+        const sh = SHAPES[st.shapeId - 1];
+        list = shapeChords(sh).map(c => libChord(c.root, c.type, c.bass));
+        head = `<select id="libshape">${SHAPES.map(s => `<option value="${s.id}"${s.id === st.shapeId ? ' selected' : ''}>${s.id}. ${esc(s.name)} (${s.std ? 'Bấm chuẩn' : 'Kiểu Phildave'})</option>`).join('')}</select>`;
+      }
+      $('libgrp').innerHTML = head + `<div class="libchips">${list.map((c, i) => `<button class="b" data-libc="${i}">${esc(libLabel(c))}</button>`).join('')}</div>`;
+      $('libgrp').querySelectorAll('[data-libkey]').forEach(b => b.onclick = () => { st.key = +b.dataset.libkey; st.off = []; grp(); });
+      if ($('libshape')) $('libshape').onchange = e => { st.shapeId = +e.target.value; st.off = []; grp(); };
+      const sh = st.group === 'shape' ? SHAPES[st.shapeId - 1] : null;
+      $('libgrp').querySelectorAll('[data-libc]').forEach(b => b.onclick = () => pick(list[+b.dataset.libc], sh));
+      prac();
+    };
+    // khu tập: nhóm đang xem ở trên, lọc loại + "chỉ gốc phím trắng", Tập tự do / Tính điểm, mốc giờ như Đố
+    const prac = () => {
+      const group = st.group === 'key' ? { kind: 'key', key: st.key } : { kind: 'shape', id: st.shapeId }, fixed = libFixedShape(group), sc = st.mode === 'score';
+      const base = libGroupChords(group), types = [...new Set(base.map(c => c.type))], on = types.filter(t => !st.off.includes(t)), pool = libPool(group, { types: on, white: st.white });
+      const tlab = t => { const c = base.find(x => x.type === t); return t === 'maj' ? 'trưởng' : t === 'min' ? 'thứ' : libLabel(c).slice((c.rootName ?? nm(c.root)).length); };
+      const seg = (attr, val, lab, act) => `<button class="b seg${act ? ' act' : ''}" data-${attr}="${val}">${esc(lab)}</button>`;
+      const style = fixed ? 'phil' : settings.libStyle, h = ((progress.lib && progress.lib.history) || {})[libKey(group, style, st.timer, settings.level)] || [];
+      $('libprac').innerHTML = `<h3>Tập bấm nhóm này</h3><p class="mut">${esc(libGroupName(group))} · ${pool.length} hợp âm · ${fixed ? 'thế cố định của hình' : esc(libStyleName(style))}</p>
+        <div class="qlab">Loại hợp âm</div><div class="libtypes">${types.map(t => `<label><input type="checkbox" data-libtype="${t}"${on.includes(t) ? ' checked' : ''}>${esc(tlab(t))}</label>`).join('')}</div>
+        <div class="row">${seg('libroots', 'all', '12 gốc', !st.white)}${seg('libroots', 'white', 'Chỉ gốc phím trắng', st.white)}</div>
+        <div class="row">${seg('libmode', 'free', 'Tập tự do', !sc)}${seg('libmode', 'score', `Tính điểm (${LIB_ROUND} câu)`, sc)}</div>
+        <div class="qlab">${sc ? 'Giờ mỗi câu (hết giờ tính sai)' : 'Chưa bấm đúng thì hiện đáp án sau'}</div><div class="row">${TIMER_LEVELS.map(t => seg('libtimer', t.id, `${t.label} ${t.sec}s`, st.timer === t.id)).join('')}</div>
+        <div class="row"><button class="b pri" id="libstart"${pool.length ? '' : ' disabled'}>${sc ? 'Bắt đầu lượt' : 'Bắt đầu tập'}</button></div>
+        ${pool.length ? '' : '<p class="bad">Chọn ít nhất một loại hợp âm, hoặc bỏ "Chỉ gốc phím trắng".</p>'}
+        ${sc ? `<div class="qlab">Điểm 10 lần gần nhất (cùng nhóm, kiểu bấm, mốc giờ, mức tay)</div>${h.length ? barsChart(h, LIB_ROUND, null, a => 'trung bình ' + fmtSec(a.avgMs)) : '<p class="mut">Chưa có lần nào với lựa chọn này.</p>'}` : ''}`;
+      const P = $('libprac');
+      P.querySelectorAll('[data-libtype]').forEach(b => b.onchange = () => { const t = b.dataset.libtype; st.off = b.checked ? st.off.filter(x => x !== t) : [...st.off, t]; prac(); });
+      P.querySelectorAll('[data-libroots]').forEach(b => b.onclick = () => { st.white = b.dataset.libroots === 'white'; prac(); });
+      P.querySelectorAll('[data-libmode]').forEach(b => b.onclick = () => { st.mode = b.dataset.libmode; prac(); });
+      P.querySelectorAll('[data-libtimer]').forEach(b => b.onclick = () => { st.timer = b.dataset.libtimer; prac(); });
+      $('libstart').onclick = () => libStart({ mode: st.mode, group, types: on, white: st.white, timer: st.timer });
+    };
+    $('main').querySelectorAll('[data-libgroup]').forEach(b => b.onclick = () => { st.group = b.dataset.libgroup; st.off = []; grp(); });
+    grp(); show();
+  }
+
+  const TABS = { learn, quiz, reharm, library };
   document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
     stopPlay();      // vòng đang phát ở Tái hoà âm không được giành bảng luyện của tab khác
     document.querySelectorAll('nav button').forEach(x => x.classList.toggle('act', x === b));
@@ -4207,8 +4794,15 @@ if (typeof document !== 'undefined') {
     stopPlay();
     settings.level = +e.target.value;
     persist();
+    if (libRun) {   // đang tập ở Thư viện: tự do thì đổi thế ngay; tính điểm thì hỏi bắt đầu lại (khoá lịch sử gồm mức tay)
+      const r = libRun, back = () => { settings.level = r.level; $('level').value = r.level; persist(); };
+      if (r.mode === 'free') { r.level = settings.level; libView(); libSetQ(); }
+      else if ($('lconfirm')) back();
+      else libConfirm('Đổi mức tay sẽ bắt đầu lại lượt này?', 'Bắt đầu lại', 'Giữ mức cũ', () => libStart({ mode: r.mode, group: r.group, types: r.types, white: r.white, timer: r.timer }), back);
+      return;
+    }
     // target cũ mang c.v của mức cũ → bỏ target để bàn phím, chấm và phát đều theo mức mới
-    lessonRun++; demo = null; target = null; onDone = null; showing = false; tapped.clear();
+    lessonRun++; demo = null; target = null; onDone = null; showing = false; tapped.clear(); libQ = null;
     $('ptitle').textContent = 'Mở một bài ở mục Học, hoặc chạm hợp âm ở mục Tái hoà âm để luyện tay';
     $('phint').textContent = ''; $('pres').textContent = '';
     TABS[document.querySelector('nav button.act').dataset.t](); drawKb();
@@ -4265,6 +4859,160 @@ if (typeof document !== 'undefined') {
   };
   const answerRight = () => { const r = [...$('main').querySelectorAll('.choices [data-n]')].find(b => b.dataset.n === b.dataset.answer); if (r) r.click(); return !!r; };
   const DOMTESTS = [
+{ name:'TV-T2: tab Thư viện tra cứu bằng gõ và bằng click; đổi kiểu bấm; Tái hoà âm chọn hợp âm bằng click', async fn() {
+    const tick = () => new Promise(r => setTimeout(r, 0)), keep = { ...settings };
+    try {
+      click('nav button[data-t="library"]');
+      const q = document.querySelector('#libq'); q.value = 'E7'; q.dispatchEvent(new Event('input')); await tick();
+      ok(document.querySelector('#libout').textContent.includes('G#'), 'E7 phải ghi G#');
+      q.value = 'Hm'; q.dispatchEvent(new Event('input')); await tick(); ok(document.querySelector('#libout').textContent.includes('không đọc'), 'tên sai phải báo lỗi');
+      click('#libpick [data-root="9"]'); click('#libpick [data-type="m7"]'); ok(document.querySelector('#libout').textContent.includes('Am7'));
+      click('[data-libstyle="phil"]'); ok(document.querySelector('#libout').textContent.includes('Tay trái'));
+      click('[data-libstyle="std"]');
+      click('nav button[data-t="reharm"]'); const pin = document.querySelector('#pin'); pin.value = '';
+      click('#rhpick [data-root="0"]'); click('#rhpick [data-type="maj7"]'); click('#rhpick [data-root="7"]'); click('#rhpick [data-type="dom7"]');
+      eq(pin.value.trim(), 'Cmaj7 G7');
+    } finally { Object.assign(settings, keep); click('nav button[data-t="learn"]'); } } },
+{ name:'TV-T2b: Thư viện — tên lạ báo lỗi, hai loại 7(#11) nhãn khác nhau, thế đảo/tay, nhóm giọng và hình tay, mẹo ≤ 2 câu, vừa 400 px', async fn() {
+    const tick = () => new Promise(r => setTimeout(r, 0)), keep = { ...settings }, txt = () => $('libout').textContent;
+    const typ = async s => { const q = $('libq'); q.value = s; q.dispatchEvent(new Event('input')); await tick(); };
+    try {
+      click('nav button[data-t="library"]'); click('[data-libstyle="std"]');
+      for (const s of ['Hm', 'C#maj7#11', 'am', 'X', 'C/H', '7']) { await typ(s); ok(txt().includes('không đọc') && txt().includes(s), 'lỗi ' + s); }
+      await typ('am'); click('[data-libsug="Am"]'); ok($('libout').querySelector('.libname').textContent === 'Am', 'gợi ý Am');
+      await typ('Hm'); ok($('libout').querySelector('[data-libsug="Bm"]'), 'Hm gợi ý Bm');
+      // E7 bấm chuẩn: tay trái E, tay phải E G# B D; bàn phím tô đúng
+      await typ('E7'); ok(txt().includes('Tay trái: E · Tay phải: E G# B D'), txt());
+      eq([...document.querySelectorAll('#kb .lh')].map(d => d.dataset.n).join(), '40'); eq([...document.querySelectorAll('#kb .rh')].map(d => d.dataset.n).join(), '64,68,71,74');
+      // bàn phím (I1): tay phải E7 nằm trọn trong khung, tay trái ghi ở mép trái; C (ba nốt) và Am7 Phildave thấy cả thế
+      const inView = sel => { const w = $('kbwrap'), L = w.scrollLeft, R = L + w.clientWidth; return [...document.querySelectorAll(sel)].every(d => d.offsetLeft >= L - 1 && d.offsetLeft + d.offsetWidth <= R + 1); };
+      ok(inView('#kb .rh'), 'E7: tay phải ngoài khung'); ok($('lhaway') && $('lhaway').textContent.includes('E'), 'E7: thiếu nhãn tay trái');
+      await typ('C'); ok(inView('#kb .rh, #kb .lh'), 'C ngoài khung'); await typ('Am7'); click('[data-libstyle="phil"]'); ok(inView('#kb .rh') && (inView('#kb .lh') || $('lhaway')), 'Am7 Phildave'); click('[data-libstyle="std"]');
+      ok(getComputedStyle($('show')).display === 'none', 'ẩn Hiện cách bấm ở Thư viện');
+      // hai loại 7(#11): gõ ra bản cơ bản, có nút sang kiểu thầy; nhãn khác nhau
+      await typ('Bb7(#11)'); eq($('libout').querySelector('.libname').textContent, 'Bb7(#11) cơ bản'); click('[data-libalt]');
+      eq($('libout').querySelector('.libname').textContent, 'Bb7(#11) kiểu thầy');
+      // ba nốt: tay và thế đảo
+      await typ('C'); click('[data-libhand="L"]'); ok(txt().includes('Tay trái (một tay): C E G'), txt()); click('[data-libinv="1"]'); ok(txt().includes('Tay trái (một tay): E G C'), txt());
+      ok(txt().includes('Đảo 1'), 'mẹo đảo 1'); click('[data-libhand="R"]'); click('[data-libinv="0"]');
+      await typ('G7'); ok(!$('libout').querySelector('[data-libhand]'), 'nút tay chỉ hiện với ba nốt');
+      // m11 kiểu thầy: nhắc giống 9sus4
+      await typ('Dm11'); click('[data-libstyle="phil"]'); ok(txt().toLowerCase().includes('thầy bấm m11 giống 9sus4'), txt()); click('[data-libstyle="std"]');
+      // bộ chọn: không có hai nút cùng nhãn ở một gốc
+      for (let r = 0; r < 12; r++) { click(`#libpick [data-root="${r}"]`); const labs = [...document.querySelectorAll('#libpick [data-type]')].map(b => b.textContent); eq(new Set(labs).size, labs.length); }
+      // nhóm theo giọng: nhãn không trùng; giọng Gb, Db, Ab có dòng ghi chú cách viết
+      click('[data-libgroup="key"]');
+      for (let k = 0; k < 12; k++) { click(`[data-libkey="${k}"]`); const labs = [...document.querySelectorAll('#libgrp [data-libc]')].map(b => b.textContent);
+        eq(new Set(labs).size, labs.length); eq($('libgrp').textContent.includes('Cb, Fb'), [1, 6, 8].includes(k)); }
+      click('[data-libkey="0"]'); ok([...document.querySelectorAll('#libgrp [data-libc]')].some(b => b.textContent === 'Bb7(#11) kiểu thầy'), 'giọng C có Bb7(#11) kiểu thầy');
+      // nhóm theo hình tay: hình 12 (tay trái 3 – 7) hiện đúng thế; hình 2 = đảo 1 bấm chuẩn
+      click('[data-libgroup="shape"]'); const sel = $('libshape'); sel.value = '12'; sel.onchange({ target: sel });
+      [...document.querySelectorAll('#libgrp [data-libc]')].find(b => b.textContent === 'G7').click();
+      eq([...document.querySelectorAll('#kb .lh')].map(d => +d.dataset.n % 12).sort((a, b) => a - b).join(), '5,11'); ok(txt().includes('Hình tay 12'), txt());
+      sel.value = '2'; sel.onchange({ target: sel }); [...document.querySelectorAll('#libgrp [data-libc]')].find(b => b.textContent === 'Am').click(); ok(txt().includes('C E A'), txt());
+      click('#libpick [data-root="2"]'); ok(document.documentElement.scrollWidth <= window.innerWidth + 1, `rộng ${document.documentElement.scrollWidth} > ${window.innerWidth}`);
+      // Tái hoà âm: bộ chọn bỏ 7(#11) cơ bản và tên có dấu cách; mọi tên còn lại đi qua ô nhập (parseProg) ra đúng loại; nút bỏ hợp âm cuối
+      click('nav button[data-t="reharm"]'); click('#rhpick [data-root="0"]');
+      const rt = [...document.querySelectorAll('#rhpick [data-type]')].map(b => b.dataset.type); ['dom7s11', 'alt1', 'alt2'].forEach(t => ok(!rt.includes(t), 'Tái hoà âm không có ' + t));
+      for (let r = 0; r < 12; r++) for (const t of rt) { const c = libChord(r, t), pr = parseProg('C ' + c.name + ' G7'); ok(!pr.bad && pr.chords[1].type === t && pr.chords[1].root === r, c.name + ' qua ô nhập'); }
+      $('pin').value = 'C Am'; click('#rhpick [data-type="lyd"]'); eq($('pin').value, 'C Am C13(#11)'); click('#rhback'); eq($('pin').value, 'C Am');
+    } finally { Object.assign(settings, keep); click('nav button[data-t="learn"]'); } } },
+{ name:'TV-T3: tập tự do hiện đáp án sau N giây; lượt tính điểm 20 câu, hết giờ tính sai, lưu lịch sử; đổi kiểu giữa lượt hỏi bắt đầu lại; đổi tab dừng đồng hồ', async fn() {
+    const keep = JSON.stringify(progress), keepS = { ...settings }, keepSt = { ...libSt }, keepNext = libCfg.nextMs, wait = ms => new Promise(r => setTimeout(r, ms)), keepClock = challenge.clock, realSet = window.setInterval, realClear = window.clearInterval, live = new Set();
+    window.setInterval = (f, ms) => { const id = realSet(f, ms); live.add(id); return id; }; window.clearInterval = id => { live.delete(id); realClear(id); };
+    let hidden = false, t = 0; Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+    const vis = h => { hidden = h; document.dispatchEvent(new Event('visibilitychange')); }, lit = () => document.querySelectorAll('#kb .lh, #kb .rh').length;
+    const ans = () => [...libQ.v.lh, ...libQ.v.rh], mem = raw => ({ getItem: () => raw, setItem() {} });
+    try {
+      challenge.clock = () => t; Object.assign(settings, { libStyle: 'std', libHand: 'R' }); progress.lib = { history: {} };
+      click('nav button[data-t="library"]'); click('[data-libgroup="shape"]'); const sel = $('libshape'); sel.value = '1'; sel.onchange({ target: sel });
+      // tập tự do, mốc 12 s: chưa hết giờ không hiện; hết giờ hiện đáp án (tô .lh/.rh như phần Học); bấm sai báo lỗi, bấm đúng (chạm + Kiểm tra) sang câu kế
+      click('[data-libmode="free"]'); click('[data-libtimer="mid"]'); click('#libstart'); ok(libRun && libRun.mode === 'free' && live.size === 1, 'tập tự do chưa chạy');
+      ok(getComputedStyle($('checkTap')).display !== 'none' && getComputedStyle($('show')).display !== 'none', 'Kiểm tra (chạm) / Hiện cách bấm phải hiện khi tập');
+      t += 11900; libTick(); eq(lit(), 0); t += 200; libTick(); ok(lit() >= 3, 'hết 12 s chưa hiện đáp án'); eq(live.size, 0); ok($('lfb').textContent.includes('Mẹo'), 'thiếu mẹo khi hiện đáp án');
+      judge([61, 62, 63]); ok($('pres').textContent.includes('Chưa đúng'), 'bấm sai không báo'); eq(libRun.count, 0);
+      const c1 = libRun.c; ans().forEach(n => document.querySelector(`#kb [data-n="${n}"]`).click()); click('#checkTap');
+      eq(libRun.count, 1); ok(libId(libRun.c) !== libId(c1), 'lặp hợp âm liền nhau'); eq(lit(), 0); eq(live.size, 1);
+      click('[data-libstyle="phil"]'); ok(!$('lconfirm'), 'tự do không hỏi'); eq(libRun.style, 'phil'); eq(settings.libStyle, 'phil'); click('[data-libstyle="std"]');
+      // trang ẩn: đồng hồ dừng, ẩn lâu cũng không hiện đáp án
+      t += 3000; libTick(); vis(true); eq(live.size, 0); t += 600000; libTick(); eq(lit(), 0); vis(false); eq(live.size, 1);
+      t += 8000; libTick(); eq(lit(), 0); t += 1100; libTick(); ok(lit() > 0, 'sau khi hiện lại vẫn phải hết giờ đúng 12 s');
+      judge(ans()); eq(live.size, 1); click('nav button[data-t="learn"]'); eq(live.size, 0); eq(libRun, null); t += 99999; libTick(); eq(live.size, 0);
+      // tính điểm, Nhanh 7s: 18 câu đúng, 2 câu hết giờ → 18/20, lịch sử có 1 lần
+      click('nav button[data-t="library"]'); click('[data-libmode="score"]'); click('[data-libtimer="fast"]');
+      const round = (good, start) => { click(start); const r = libRun; eq(r.qs.length, 20);
+        for (let i = 0; i < 20; i++) { eq($('lprog').textContent, `Câu ${i + 1}/20`);
+          if (i < good) t += 1000; else { t += 7000; libTick(); ok(lit() > 0, 'hết giờ chưa hiện đáp án'); }
+          judge(ans()); }
+        return r; };
+      round(18, '#libstart'); eq($('lfinal').textContent, '18/20'); eq(libRun, null); eq(live.size, 0);
+      const k = libKey({ kind: 'shape', id: 1 }, 'std', 'fast', settings.level), h = progress.lib.history[k];
+      ok(h && h.length === 1 && h[0].score === 18 && h[0].total === 20 && h[0].avgMs === 1600, JSON.stringify(progress.lib));
+      ok($('lcmp').textContent.includes('Lần đầu'), $('lcmp').textContent); ok($('lmiss'), 'thiếu danh sách câu sai');
+      round(20, '#lagain'); eq($('lfinal').textContent, '20/20'); ok($('lcmp').textContent.includes('cao hơn lần trước 2 điểm'), $('lcmp').textContent); eq(progress.lib.history[k].length, 2);
+      // đổi kiểu giữa lượt: hỏi; đang hỏi thì đồng hồ dừng, không chấm; Giữ kiểu cũ chạy tiếp; Bắt đầu lại → câu 1/20 kiểu mới
+      click('#lagain'); t += 1000; judge(ans()); eq($('lprog').textContent, 'Câu 2/20');
+      click('[data-libstyle="phil"]'); ok($('lconfirm') && $('lconfirm').textContent.includes('Đổi kiểu sẽ bắt đầu lại lượt này?'), 'không hỏi đổi kiểu'); eq(live.size, 0);
+      judge(ans()); eq($('lprog').textContent, 'Câu 2/20'); click('#lno'); eq(live.size, 1); eq(libRun.style, 'std');
+      click('[data-libstyle="phil"]'); click('#lyes'); eq($('lprog').textContent, 'Câu 1/20'); eq(libRun.style, 'phil'); eq(settings.libStyle, 'phil'); eq(live.size, 1);
+      click('#lstop'); click('#lyes'); eq(libRun, null); eq(live.size, 0); eq(progress.lib.history[k].length, 2); ok($('libstart'), 'Dừng không về thư viện');
+      // nhóm lọc còn 4 hợp âm (giọng C, chỉ m7): 20 câu, không hai câu liền nhau trùng; đổi tab giữa lượt dừng đồng hồ
+      click('[data-libgroup="key"]'); click('[data-libkey="0"]');
+      for (let g = 0, b; g < 40 && (b = [...document.querySelectorAll('#libprac [data-libtype]')].find(x => x.checked && x.dataset.libtype !== 'm7')); g++) { b.checked = false; b.onchange(); }
+      ok($('libprac').textContent.includes('· 4 hợp âm'), $('libprac').textContent.slice(0, 80)); click('#libstart');
+      const qs = libRun.qs; eq(qs.length, 20); eq(new Set(qs.map(libId)).size, 4); ok(qs.every((c, i) => !i || libId(c) !== libId(qs[i - 1])), 'lặp liền nhau');
+      click('nav button[data-t="learn"]'); eq(live.size, 0); eq(libRun, null);
+      for (let n = 0; n < 30; n++) { const o = libOrder(libPool({ kind: 'key', key: 0 }, { types: ['m7b5', 'dim'] })); ok(o.length === 20 && o.every((c, i) => !i || libId(c) !== libId(o[i - 1])), o.map(c => c.name).join()); }
+      // hình 12 luôn tay trái 3 – 7, không theo mức tay hay kiểu bấm
+      for (const lv of [1, 4]) { settings.level = lv; eq(libAnswer(chord(7, 'dom7'), { kind: 'shape', id: 12 }, 'std').lh.map(n => n % 12).sort((a, b) => a - b).join(), '5,11'); }
+      // fix I1: thế hai tay phải đủ số nốt (E7 bấm chuẩn cần cả hai nốt E); thế một tay giữ luật cũ ở mọi quãng tám
+      const e7c = libChord(4, 'dom7'), e7 = stdVoicing(e7c); ok(!libGrade([64, 68, 71, 74], e7), 'E7 chỉ tay phải không được đúng'); ok(libGrade([40, 64, 68, 71, 74], e7), 'E7 đủ hai tay');
+      ok(libMiss([64, 68, 71, 74], e7c, e7).includes('tay trái'), libMiss([64, 68, 71, 74], e7c, e7));
+      const am = stdVoicing(libChord(9, 'min')), amn = [...am.lh, ...am.rh]; ok(libGrade(amn, am) && libGrade(amn.map(n => n + 12), am), 'Am một tay');
+      // hình 4 (hai tay), tự do: chạm chỉ tay phải → chưa đúng; chạm thêm tay trái → đúng
+      click('nav button[data-t="library"]'); click('[data-libgroup="shape"]'); const s4 = $('libshape'); s4.value = '4'; s4.onchange({ target: s4 }); click('[data-libmode="free"]'); click('#libstart');
+      click('#show'); ok(lit() > 0, 'Hiện cách bấm không hiện');
+      const v4 = libQ.v, tapK = ns => ns.forEach(n => document.querySelector(`#kb [data-n="${n}"]`).click());
+      tapK(v4.rh); click('#checkTap'); ok($('pres').textContent.includes('Chưa đúng'), 'chỉ tay phải mà đúng'); eq(libRun.count, 0);
+      tapK(v4.lh); click('#checkTap'); eq(libRun.count, 1);
+      // fix I3: đã hiện đáp án rồi đổi kiểu (tự do): lời đáp án và bàn phím cùng một thế
+      click('#show'); click('[data-libstyle="phil"]'); ok($('lfb').textContent.includes($('phint').textContent), $('lfb').textContent + ' / ' + $('phint').textContent); click('[data-libstyle="std"]');
+      ok($('lfb').textContent.includes($('phint').textContent), 'std: ' + $('lfb').textContent);
+      // fix M3: đổi mức tay khi tập tự do: vẫn tập, theo mức mới
+      const lv = $('level'); lv.value = '2'; lv.onchange({ target: lv }); ok(libRun && libRun.level === 2 && settings.level === 2, 'đổi mức tay làm mất lượt tự do');
+      // fix M1: trang ẩn lúc sang câu mới: chưa chạy giờ, hiện lại mới chạy
+      judge(ans()); eq(live.size, 1); vis(true); judge(ans()); eq(live.size, 0); eq(libRun.count, 3); vis(false); eq(live.size, 1);
+      // fix I2: Dừng trong lúc chờ sang câu kế: câu kế chờ trả lời; Tập tiếp mới sang câu; Dừng hẳn thì không sang
+      click('#lstop'); click('[data-libmode="score"]'); click('#libstart'); libCfg.nextMs = 30;
+      t += 1000; judge(ans()); click('#lstop'); await wait(80); ok($('lconfirm'), 'hỏi Dừng bị mất'); eq($('lprog').textContent, 'Câu 1/20');
+      click('#lno'); eq($('lprog').textContent, 'Câu 2/20'); ok(!libRun.confirming && live.size === 1, 'kẹt sau Tập tiếp');
+      t += 1000; judge(ans()); click('#lstop'); click('#lyes'); await wait(80); eq(libRun, null); ok($('libstart'), 'Dừng hẳn vẫn sang câu'); libCfg.nextMs = keepNext;
+      // dữ liệu cũ không có lib, dữ liệu hỏng bị bỏ
+      eq(JSON.stringify(loadProgress(mem('{"done":{}}')).lib), '{"history":{}}');
+      eq(loadProgress(mem('{"lib":{"history":{"s1|std|fast|3":[{"score":5,"total":20,"avgMs":100,"at":1},{"score":99,"total":20,"avgMs":1,"at":1}],"__proto__":[]}}}')).lib.history['s1|std|fast|3'].length, 1);
+    } finally { hidden = false; delete document.hidden; cancelLib(); libCfg.nextMs = keepNext; window.setInterval = realSet; window.clearInterval = realClear; challenge.clock = keepClock;
+      Object.assign(progress, JSON.parse(keep)); Object.assign(settings, keepS); $('level').value = settings.level; Object.assign(libSt, keepSt); click('nav button[data-t="learn"]'); } } },
+{ name:'TV-T2c: Thư viện phần thuần — mẹo ≤ 2 câu ở mọi loại, X/Y màu vừa một tay, lưu kiểu bấm', fn() {
+    const keep = settings.level;
+    try {
+      // mẹo ≤ 2 câu, không đếm số nửa cung, ở mọi loại × 12 gốc × hai kiểu (cả ba nốt đảo, có bass)
+      const sentences = t => t.split(/[.!?](?=\s|$)/).filter(x => x.trim()).length;
+      for (const level of [1, 4]) { settings.level = level;
+        for (let r = 0; r < 12; r++) for (const t of [...LIB_TYPES.flatMap(g => g.types), 'hyb', 'sus4b9']) for (const style of ['std', 'phil']) {
+          const c = libChord(r, t), v = libVoice(c, style), tip = libTip(c, style, v); ok(sentences(tip) <= 2 && !/\d+ nửa cung/.test(tip) && !/undefined|null/.test(tip), c.name + ' ' + style + ': ' + tip); } }
+      for (let r = 0; r < 12; r++) for (const inv of [1, 2]) { const c = libChord(r, 'min'); ok(sentences(libTip(c, 'std', libVoice(c, 'std', { inv }), { inv })) <= 2); }
+      for (const sh of SHAPES) for (const c of shapeChords(sh).slice(0, 8)) ok(sentences(libTip(c, 'phil', sh.voice(c), { shape: sh })) <= 2, sh.id + ' ' + c.name);
+      ok(sentences(libTip(parseSymbol('G/B'), 'std', stdVoicing(parseSymbol('G/B')))) <= 2);
+      // X/Y màu (review Task 1 N1): tay phải ≤ 4 nốt và không rộng quá quãng 9
+      for (const n of ['C13/E', 'Cm11/G', 'C13/F', 'B13/D#', 'Cmaj13(#11)/E']) { const v = stdVoicing(parseSymbol(n)); ok(v.rh.length <= 4 && v.rh[v.rh.length - 1] - v.rh[0] <= 14, n + ' ' + v.rh); }
+      eq(stdVoicing(parseSymbol('C9/E')).rh.join(), '60,67,70,74');
+      // cài đặt kiểu bấm / tay đọc lại từ bộ nhớ; dữ liệu lạ → mặc định
+      const mem = raw => ({ getItem: () => raw, setItem() {} });
+      eq(loadProgress(mem('{"settings":{"libStyle":"phil","libHand":"L"}}')).settings.libStyle, 'phil'); eq(loadProgress(mem('{"settings":{"libStyle":"phil","libHand":"L"}}')).settings.libHand, 'L');
+      eq(loadProgress(mem('{"settings":{"libStyle":"x","libHand":5}}')).settings.libStyle, 'std'); eq(loadProgress(mem('{}')).settings.libHand, 'R');
+      eq(libTip(libChord(1, 'maj'), 'std', libVoice(libChord(1, 'maj'), 'std')).includes('là ra C#m'), true);   // tên thứ như bộ chọn (M1)
+      ok(!/##|\(phím/.test(libTip(libChord(4, 's9'), 'std', libVoice(libChord(4, 's9'), 'std'))), 'E7(#9): mẹo viết G như dòng Các nốt (M2)');
+    } finally { settings.level = keep; } } },
 { name:'GĐ6-T3 fix 1: bài có giọng thăng ghi phím đen bằng dấu thăng (C#4), giọng giáng và ngoài bài ghi dấu giáng (Db4)', fn() {
     const lab = n => document.querySelector(`#kb [data-n="${n}"] .lbl`).textContent;
     try { for (const [id, w] of [['p1-10', 'C#4 G#4'], ['p1-14', 'C#4 G#4'], ['p1-09', 'C#4 G#4'], ['p1-11', 'Db4 Ab4'], ['p1-07', 'Db4 Ab4']]) {
