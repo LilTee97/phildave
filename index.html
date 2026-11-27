@@ -4230,8 +4230,17 @@ if (typeof document !== 'undefined') {
     }
   } catch (e) { console.warn('SW:', e); }
   // Chrome/Edge tạo AudioContext ở trạng thái suspended khi chưa có thao tác người dùng
-  const wake = () => { if (ac && ac.state === 'suspended') ac.resume(); };
-  ['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, wake, { once: true }));
+  // Trên Android, chạm (pointerdown/touchstart) chưa tính là thao tác người dùng: resume() lúc đó bị từ chối.
+  // Nên nghe cả touchend/click/keydown và chỉ gỡ khi âm thanh đã chạy; phát kèm một mẫu im lặng để mở khoá loa.
+  const WAKE_EVS = ['pointerdown', 'touchend', 'click', 'keydown'];
+  const wake = () => {
+    const ctx = getAC(); if (!ctx) return;
+    if (ctx.state !== 'running') {
+      try { const b = ctx.createBuffer(1, 1, 22050), s = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination); s.start(0); } catch (e) { /* bản giả */ }
+      Promise.resolve(ctx.resume && ctx.resume()).then(() => { if (ctx.state === 'running') WAKE_EVS.forEach(ev => document.removeEventListener(ev, wake, true)); }).catch(() => {});
+    } else WAKE_EVS.forEach(ev => document.removeEventListener(ev, wake, true));
+  };
+  WAKE_EVS.forEach(ev => document.addEventListener(ev, wake, true));
 
   // ---- Test giao diện (chạy khi mở trang với ?test, ví dụ http://localhost:8000/?test) ----
   const click = sel => { const e = document.querySelector(sel); ok(e, 'không thấy ' + sel); e.click(); };
@@ -4386,6 +4395,16 @@ if (typeof document !== 'undefined') {
         createOscillator: node, createGain: node };
       try { play([60]); } finally { ac = keep; }
       eq(resumed, 1); } },
+    { name: 'Tiếng trên điện thoại: chạm đầu bị từ chối thì lần chạm sau (click) vẫn đánh thức lại', async fn() {
+      const keep = ac; let resumed = 0, started = 0;
+      ac = { state: 'suspended', currentTime: 0, destination: {}, createBuffer: () => ({}),
+        createBufferSource: () => ({ connect() {}, start() { started++; } }), resume() { resumed++; if (resumed >= 2) this.state = 'running'; return Promise.resolve(); } };
+      try {
+        WAKE_EVS.forEach(ev => document.addEventListener(ev, wake, true));
+        wake(); await Promise.resolve(); await Promise.resolve();   // lần 1: vẫn suspended (như Android từ chối)
+        eq(ac.state, 'suspended'); wake(); await Promise.resolve(); await Promise.resolve();
+        eq(resumed, 2); eq(ac.state, 'running'); ok(started >= 2, 'chưa phát mẫu im lặng mở khoá loa');
+      } finally { ac = keep; WAKE_EVS.forEach(ev => document.removeEventListener(ev, wake, true)); } } },
     { name: 'Fix cuối #6: mọi tiếng đi qua gain tổng + nén chung', fn() {
       const real = getAC(); ok(real && real.master instanceof GainNode, 'AudioContext thật thiếu gain tổng');
       const keep = ac, master = { m: 1 }, outs = [];
