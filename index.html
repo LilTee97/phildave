@@ -39,17 +39,20 @@
   #practice { background:#101216; padding:8px 10px 10px; border-top:1px solid #2a2e37; }
   #ptitle { font-size:15px; min-height:20px; }
   #phint { font-size:13px; color:var(--mut); min-height:18px; white-space:pre-line; }
-  #kbwrap { overflow-x:auto; margin-top:6px; }
-  #kb { position:relative; height:110px; }
-  .w,.k { position:absolute; top:0; border-radius:0 0 4px 4px; }
-  .w { width:28px; height:110px; background:#f4f4f4; border:1px solid #888; }
-  .k { width:18px; height:68px; background:#222; z-index:2; border:1px solid #000; }
+  #kbwrap { overflow-x:auto; margin-top:6px; --ww:28px; --kh:110px; }
+  #kb { position:relative; height:var(--kh); overflow:hidden; }
+  .w,.k { position:absolute; top:0; border-radius:0 0 4px 4px; box-sizing:border-box; }
+  .w { width:var(--ww); height:var(--kh); background:#f4f4f4; border:1px solid #888; }
+  .k { width:calc(var(--ww) * .64); height:calc(var(--kh) * .62); background:#222; z-index:2; border:1px solid #000; }
+  #kbwrap.narrow .w .lbl:not(.c) { display:none; }   /* phím hẹp (điện thoại dọc): chỉ ghi tên C và phím đang sáng */
+  #kbwrap.narrow .w.lh .lbl, #kbwrap.narrow .w.rh .lbl, #kbwrap.narrow .w.on .lbl { display:block; font-size:8px; }
+  #kbwrap.narrow .k .lbl { display:none; } #kbwrap.narrow .k.lh .lbl, #kbwrap.narrow .k.rh .lbl, #kbwrap.narrow .k.on .lbl { display:block; font-size:6px; }
   .lh { background:var(--lh) !important; } .rh { background:var(--rh) !important; }
   .on { box-shadow: inset 0 -14px 0 var(--ok); }
   .lbl { position:absolute; bottom:3px; width:100%; text-align:center; font-size:10px; color:#555; pointer-events:none; }
   .lbl.c { font-size:13px; font-weight:800; color:#000; }
   .k .lbl { font-size:7.5px; letter-spacing:-.3px; color:#ddd; bottom:4px; }
-  #kblabels { position:relative; height:22px; }
+  #kblabels { position:relative; height:22px; overflow:hidden; }
   .hand { position:absolute; top:0; transform:translateX(-50%); white-space:nowrap; font-size:13px; font-weight:700; padding:1px 6px; border-radius:6px; color:#111; }
   .lesson { display:block; width:100%; text-align:left; margin-top:6px; }
   .lesson.next { border:1px solid var(--rh); }
@@ -3817,7 +3820,7 @@ if (!TEST_MODE) setTimeout(() => runFast().then(r => {
 // ---------- giao diện ----------
 if (typeof document !== 'undefined') {
   const $ = id => document.getElementById(id);
-  const LO = 36, HI = 84;
+  const LO = 36, HI = 84, WHITE_N = (() => { let k = 0; for (let n = 36; n <= 84; n++) if (![1, 3, 6, 8, 10].includes(n % 12)) k++; return k; })();
   const isBlack = n => [1,3,6,8,10].includes(n % 12);
   let mid = {}, kbTab = null, kbKey = 0, target = null, targetTop = null, targetTopName = null, demo = null, showing = false, tapped = new Set(), held = new Set(), onDone = null;
   // libQ: câu tập của Thư viện { v: thế đáp án, need: số nốt khác tên, hit(), armedAt, done } — có thì chấm bằng libGrade theo đúng thế đáp án
@@ -3847,13 +3850,16 @@ if (typeof document !== 'undefined') {
   function drawKb() {
     const kb = $('kb'); kb.innerHTML = '';
     const v = demo ? demo.v : target && showing ? (libQ ? libQ.v : voicing(target)) : { lh:[], rh:[] };
+    // Dãy phím trải hết bề ngang màn hình (PC và Android): bề rộng phím trắng = khung / số phím trắng
+    const wrap = $('kbwrap'), nW = WHITE_N, ww = Math.max(10, Math.floor((wrap.clientWidth || 28 * nW) / nW * 100) / 100), bw = ww * .64;
+    wrap.style.setProperty('--ww', ww + 'px'); wrap.style.setProperty('--kh', (ww < 20 ? 96 : 110) + 'px'); wrap.classList.toggle('narrow', ww < 22);
     let x = 0; mid = {};   // tâm ngang của từng phím, để đặt nhãn tay trái/phải
     const tTab = kbTab && !demo && target ? targetTab(target) : null;   // chỉ ở bài có giọng (kbTab): ngoài bài giữ tên phím mặc định
     for (let n = LO; n <= HI; n++) {
       const d = document.createElement('div');
       d.className = isBlack(n) ? 'k' : 'w'; d.dataset.n = n;
-      if (isBlack(n)) { d.style.left = (x - 10) + 'px'; mid[n] = x; }
-      else { d.style.left = x + 'px'; mid[n] = x + 14; x += 28; }
+      if (isBlack(n)) { d.style.left = (x - bw / 2) + 'px'; mid[n] = x; }
+      else { d.style.left = x + 'px'; mid[n] = x + ww / 2; x += ww; }
       if (v.lh.includes(n)) d.classList.add('lh');
       if (v.rh.includes(n)) d.classList.add('rh');
       if (tapped.has(n) || held.has(n)) d.classList.add('on');
@@ -3872,6 +3878,8 @@ if (typeof document !== 'undefined') {
       const cx = (mid[Math.min(...ns)] + mid[Math.max(...ns)]) / 2;
       return `<span class="hand ${cls}" style="left:${cx}px">${label}</span>`;
     }).join('');
+    // nhãn tay ở sát mép không bị cắt: kéo vào trong khung
+    const lw = $('kblabels').offsetWidth; $('kblabels').querySelectorAll('.hand').forEach(h => { const half = h.offsetWidth / 2, c = parseFloat(h.style.left); if (half && lw) h.style.left = Math.min(Math.max(c, half), lw - half) + 'px'; });
   }
 
   // Hiện hợp âm lên bàn phím khi đang nghe vòng (không cuộn trang)
@@ -4548,6 +4556,7 @@ if (typeof document !== 'undefined') {
     }
   }
   // nhãn "◀ Tay trái" dính mép trái khi cuộn tay (sticky); ẩn khi tay trái đã nằm trong khung
+  { let rz = 0; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => drawKb(), 120); }); }   // xoay máy / đổi cỡ cửa sổ: dãy phím trải lại hết bề ngang
   $('kbwrap').addEventListener('scroll', () => { const e = $('lhaway'); if (e) e.style.visibility = $('kbwrap').scrollLeft > +e.dataset.lhx ? '' : 'hidden'; });
   function cancelLib() { const r = libRun; libRun = null; libQ = null; if (r && r.timerId != null) clearInterval(r.timerId); }
   // o = { mode: 'free' | 'score', group, types, white, timer }; kiểu bấm lấy từ settings.libStyle (hình 6–13: thế cố định, ghi 'phil')
@@ -4886,7 +4895,7 @@ if (typeof document !== 'undefined') {
       eq([...document.querySelectorAll('#kb .lh')].map(d => d.dataset.n).join(), '40'); eq([...document.querySelectorAll('#kb .rh')].map(d => d.dataset.n).join(), '64,68,71,74');
       // bàn phím (I1): tay phải E7 nằm trọn trong khung, tay trái ghi ở mép trái; C (ba nốt) và Am7 Phildave thấy cả thế
       const inView = sel => { const w = $('kbwrap'), L = w.scrollLeft, R = L + w.clientWidth; return [...document.querySelectorAll(sel)].every(d => d.offsetLeft >= L - 1 && d.offsetLeft + d.offsetWidth <= R + 1); };
-      ok(inView('#kb .rh'), 'E7: tay phải ngoài khung'); ok($('lhaway') && $('lhaway').textContent.includes('E'), 'E7: thiếu nhãn tay trái');
+      ok(inView('#kb .rh'), 'E7: tay phải ngoài khung'); ok(inView('#kb .lh') || ($('lhaway') && $('lhaway').textContent.includes('E')), 'E7: tay trái không thấy, cũng không có nhãn');
       await typ('C'); ok(inView('#kb .rh, #kb .lh'), 'C ngoài khung'); await typ('Am7'); click('[data-libstyle="phil"]'); ok(inView('#kb .rh') && (inView('#kb .lh') || $('lhaway')), 'Am7 Phildave'); click('[data-libstyle="std"]');
       ok(getComputedStyle($('show')).display === 'none', 'ẩn Hiện cách bấm ở Thư viện');
       // hai loại 7(#11): gõ ra bản cơ bản, có nút sang kiểu thầy; nhãn khác nhau
@@ -5153,6 +5162,16 @@ if (typeof document !== 'undefined') {
         eq(ac.state, 'suspended'); wake(); await Promise.resolve(); await Promise.resolve();
         eq(resumed, 2); eq(ac.state, 'running'); ok(started >= 2, 'chưa phát mẫu im lặng mở khoá loa');
       } finally { ac = keep; WAKE_EVS.forEach(ev => document.removeEventListener(ev, wake, true)); } } },
+    { name: 'Dãy phím trải hết bề ngang khung (PC rộng và điện thoại 400 px)', fn() {
+      const w = $('kbwrap'), keep = w.style.width;
+      try {
+        for (const W of [1280, 400]) {
+          w.style.width = W + 'px'; drawKb();
+          const kbw = $('kb').offsetWidth; ok(Math.abs(kbw - w.clientWidth) <= WHITE_N, `${W}px: dãy phím ${kbw}px, khung ${w.clientWidth}px`);
+          ok(w.scrollWidth <= w.clientWidth + 1, `${W}px: scrollWidth ${w.scrollWidth} > ${w.clientWidth}; kb ${$("kb").offsetWidth}, labels ${$("kblabels").offsetWidth}`);   // không còn phải kéo ngang
+          eq(w.classList.contains('narrow'), W === 400);
+        }
+      } finally { w.style.width = keep; drawKb(); } } },
     { name: 'Fix cuối #6: mọi tiếng đi qua gain tổng + nén chung', fn() {
       const real = getAC(); ok(real && real.master instanceof GainNode, 'AudioContext thật thiếu gain tổng');
       const keep = ac, master = { m: 1 }, outs = [];
